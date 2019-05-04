@@ -1,22 +1,23 @@
 use crate::random_access_file::*;
 use std::cell::RefCell;
+use std::rc::Rc;
 
-pub struct DpfsLevel<'a> {
-    selector: &'a RandomAccessFile,
-    pair: &'a RandomAccessFile,
+pub struct DpfsLevel {
+    selector: Rc<RandomAccessFile>,
+    pair: [Rc<RandomAccessFile>; 2],
     block_len: usize,
     len: usize,
     dirty: RefCell<Vec<u32>>,
 }
 
-impl<'a> DpfsLevel<'a> {
+impl DpfsLevel {
     pub fn new(
-        selector: &'a RandomAccessFile,
-        pair: &'a RandomAccessFile,
+        selector: Rc<RandomAccessFile>,
+        pair: [Rc<RandomAccessFile>; 2],
         block_len: usize,
-    ) -> DpfsLevel<'a> {
-        assert!(pair.len() % 2 == 0);
-        let len = pair.len() / 2;
+    ) -> DpfsLevel {
+        let len = pair[0].len();
+        assert_eq!(pair[1].len(), len);
         let block_count = 1 + (len - 1) / block_len;
         let chunk_count = 1 + (block_count - 1) / 32;
         assert_eq!(chunk_count * 4, selector.len());
@@ -31,7 +32,7 @@ impl<'a> DpfsLevel<'a> {
     }
 }
 
-impl<'a> RandomAccessFile for DpfsLevel<'a> {
+impl RandomAccessFile for DpfsLevel {
     fn read(&self, pos: usize, buf: &mut [u8]) -> Result<(), Error> {
         let end = pos + buf.len();
         assert!(end <= self.len());
@@ -62,17 +63,14 @@ impl<'a> RandomAccessFile for DpfsLevel<'a> {
             for block_i in block_i_begin..block_i_end {
                 // the partition we are going to read from
                 let select_bit = (select >> (block_i - chunk_i * 32)) & 1;
-                let pair_offset = select_bit as usize * self.len;
 
                 // data range we operate on within this block
                 let data_begin = std::cmp::max(block_i * self.block_len, pos);
                 let data_end = std::cmp::min((block_i + 1) * self.block_len, end);
 
                 // read the data
-                self.pair.read(
-                    data_begin + pair_offset,
-                    &mut buf[data_begin - pos..data_end - pos],
-                )?;
+                self.pair[select_bit as usize]
+                    .read(data_begin, &mut buf[data_begin - pos..data_end - pos])?;
             }
         }
 
@@ -109,7 +107,6 @@ impl<'a> RandomAccessFile for DpfsLevel<'a> {
                 // the partition (inactive partition) we are going to write to
                 let shift = block_i - chunk_i * 32;
                 let select_bit = (select >> shift) & 1;
-                let pair_offset = select_bit as usize * self.len;
 
                 // data range this block covers
                 let data_begin_as_block = block_i * self.block_len;
@@ -120,32 +117,26 @@ impl<'a> RandomAccessFile for DpfsLevel<'a> {
                 let data_end = std::cmp::min(data_end_as_block, end);
 
                 // write the data
-                self.pair.write(
-                    data_begin + pair_offset,
-                    &buf[data_begin - pos..data_end - pos],
-                )?;
+                self.pair[select_bit as usize]
+                    .write(data_begin, &buf[data_begin - pos..data_end - pos])?;
 
                 // if the block was clean, and we have just written an incomplete block,
                 // we need to transfer the margin data from the active partition to the inactive partition.
                 let keep_bit = (*dirty >> shift) & 1;
                 if keep_bit == 0 {
-                    // the active partition
-                    let other_offset = (1 - select_bit) as usize * self.len;
-
+                    let other = 1 - select_bit;
                     // left margin
                     if data_begin > data_begin_as_block {
                         let mut block_buf = vec![0; data_begin - data_begin_as_block];
-                        self.pair
-                            .read(data_begin_as_block + other_offset, &mut block_buf)?;
-                        self.pair
-                            .write(data_begin_as_block + pair_offset, &block_buf)?;
+                        self.pair[other as usize].read(data_begin_as_block, &mut block_buf)?;
+                        self.pair[select_bit as usize].write(data_begin_as_block, &block_buf)?;
                     }
 
                     // right margin
                     if data_end < data_end_as_block {
                         let mut block_buf = vec![0; data_end_as_block - data_end];
-                        self.pair.read(data_end + other_offset, &mut block_buf)?;
-                        self.pair.write(data_end + pair_offset, &block_buf)?;
+                        self.pair[other as usize].read(data_end, &mut block_buf)?;
+                        self.pair[select_bit as usize].write(data_end, &block_buf)?;
                     }
                 }
 
@@ -181,11 +172,12 @@ mod test {
     use crate::dpfs_level::DpfsLevel;
     use crate::memory_file::MemoryFile;
     use crate::random_access_file::*;
+    use std::rc::Rc;
 
     #[test] #[rustfmt::skip]
     fn test() {
-        let selector = MemoryFile::new(vec![0x00, 0xFF, 0xF0, 0x0F, 0xAA, 0xAA, 0x55, 0x05]);
-        let pair = MemoryFile::new(vec![
+        let selector = Rc::new(MemoryFile::new(vec![0x00, 0xFF, 0xF0, 0x0F, 0xAA, 0xAA, 0x55, 0x05]));
+        let pair: [Rc<RandomAccessFile>; 2] = [Rc::new(MemoryFile::new(vec![
             0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
             0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
             0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
@@ -204,8 +196,8 @@ mod test {
             0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
             0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
             0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-            0xFF,
-
+            0xFF
+        ])), Rc::new(MemoryFile::new(vec![
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -225,9 +217,9 @@ mod test {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00,
-        ]);
+        ]))];
 
-        let file = DpfsLevel::new(&selector, &pair, 2);
+        let file = DpfsLevel::new(selector.clone(), pair.clone(), 2);
         assert_eq!(file.len(), 128 - 7);
         let mut buf1 = [0; 16];
         file.read(65, &mut buf1).unwrap();
@@ -244,7 +236,7 @@ mod test {
         file.commit().unwrap();
         file.read(99, &mut buf3).unwrap();
         assert_eq!(buf3, [0xFF, 0x11, 0x22, 0x33, 0x44, 0x55, 0x00]);
-        let file = DpfsLevel::new(&selector, &pair, 2);
+        let file = DpfsLevel::new(selector, pair, 2);
         file.read(99, &mut buf3).unwrap();
         assert_eq!(buf3, [0xFF, 0x11, 0x22, 0x33, 0x44, 0x55, 0x00]);
     }
@@ -261,18 +253,27 @@ mod test {
             let block_count = 1 + (len - 1) / block_len;
             let chunk_count = 1 + (block_count - 1) / 32;
             let selector_len = chunk_count * 4;
-            let selector = MemoryFile::new(rng.sample_iter(&Standard).take(selector_len).collect());
-            let pair = MemoryFile::new(rng.sample_iter(&Standard).take(len * 2).collect());
+            let selector = Rc::new(MemoryFile::new(
+                rng.sample_iter(&Standard).take(selector_len).collect(),
+            ));
+            let pair: [Rc<RandomAccessFile>; 2] = [
+                Rc::new(MemoryFile::new(
+                    rng.sample_iter(&Standard).take(len).collect(),
+                )),
+                Rc::new(MemoryFile::new(
+                    rng.sample_iter(&Standard).take(len).collect(),
+                )),
+            ];
             let init: Vec<u8> = rng.sample_iter(&Standard).take(len).collect();
-            let plain = MemoryFile::new(init.clone());
-            let mut dpfs_level = DpfsLevel::new(&selector, &pair, block_len);
+            let mut dpfs_level = DpfsLevel::new(selector.clone(), pair.clone(), block_len);
             dpfs_level.write(0, &init).unwrap();
+            let plain = MemoryFile::new(init);
 
             for _ in 0..100 {
                 let operation = rng.gen_range(1, 10);
                 if operation == 1 {
                     dpfs_level.commit().unwrap();
-                    dpfs_level = DpfsLevel::new(&selector, &pair, block_len);
+                    dpfs_level = DpfsLevel::new(selector.clone(), pair.clone(), block_len);
                 } else if operation < 4 {
                     dpfs_level.commit().unwrap();
                 } else {
