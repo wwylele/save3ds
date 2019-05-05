@@ -6,6 +6,7 @@ use std::rc::Rc;
 const BLOCK_UNVERIFIED: u8 = 0;
 const BLOCK_VERIFIED: u8 = 1;
 const BLOCK_MODIFIED: u8 = 2;
+const BLOCK_BROKEN: u8 = 3;
 
 pub struct IvfcLevel {
     hash: Rc<RandomAccessFile>,
@@ -20,18 +21,20 @@ impl IvfcLevel {
         hash: Rc<RandomAccessFile>,
         data: Rc<RandomAccessFile>,
         block_len: usize,
-    ) -> IvfcLevel {
+    ) -> Result<IvfcLevel, Error> {
         let len = data.len();
         let block_count = 1 + (len - 1) / block_len;
-        assert_eq!(block_count * 0x20, hash.len());
+        if block_count * 0x20 > hash.len() {
+            return make_error(Error::SizeMismatch);
+        }
         let chunk_count = 1 + (block_count - 1) / 4;
-        IvfcLevel {
+        Ok(IvfcLevel {
             hash,
             data,
             block_len,
             len,
             status: RefCell::new(vec![0; chunk_count]),
-        }
+        })
     }
 
     pub fn get_status(&self, block_index: usize) -> u8 {
@@ -50,7 +53,9 @@ impl IvfcLevel {
 impl RandomAccessFile for IvfcLevel {
     fn read(&self, pos: usize, buf: &mut [u8]) -> Result<(), Error> {
         let end = pos + buf.len();
-        assert!(end <= self.len());
+        if end > self.len() {
+            return make_error(Error::OutOfBound);
+        }
 
         // block index range the operation covers
         let begin_block = pos / self.block_len;
@@ -61,19 +66,25 @@ impl RandomAccessFile for IvfcLevel {
             let data_begin_as_block = i * self.block_len;
             let data_end_as_block = std::cmp::min((i + 1) * self.block_len, self.len);
 
+            let status = self.get_status(i);
+            if status == BLOCK_BROKEN {
+                return make_error(Error::HashMismatch);
+            }
+
             let mut block_buf = vec![0; self.block_len];
             self.data.read(
                 data_begin_as_block,
                 &mut block_buf[0..data_end_as_block - data_begin_as_block],
             )?;
-            if self.get_status(i) == BLOCK_UNVERIFIED {
+            if status == BLOCK_UNVERIFIED {
                 let mut hasher = Sha256::new();
                 hasher.input(&block_buf);
                 let hash = hasher.result();
                 let mut hash_stored = [0; 0x20];
                 self.hash.read(i * 0x20, &mut hash_stored)?;
                 if hash[..] != hash_stored[..] {
-                    return Err(Error::HashMismatch);
+                    self.set_status(i, BLOCK_BROKEN);
+                    return make_error(Error::HashMismatch);
                 }
                 self.set_status(i, BLOCK_VERIFIED);
             }
@@ -91,7 +102,9 @@ impl RandomAccessFile for IvfcLevel {
     }
     fn write(&self, pos: usize, buf: &[u8]) -> Result<(), Error> {
         let end = pos + buf.len();
-        assert!(end <= self.len());
+        if end > self.len() {
+            return make_error(Error::OutOfBound);
+        }
         self.data.write(pos, buf)?;
 
         // block index range the operation covers
@@ -151,7 +164,7 @@ mod test {
             let data = Rc::new(MemoryFile::new(
                 rng.sample_iter(&Standard).take(len).collect(),
             ));
-            let mut ivfc_level = IvfcLevel::new(hash.clone(), data.clone(), block_len);
+            let mut ivfc_level = IvfcLevel::new(hash.clone(), data.clone(), block_len).unwrap();
             let mut buf = vec![0; len];
             match ivfc_level.read(0, &mut buf) {
                 Err(Error::HashMismatch) => (),
@@ -161,11 +174,11 @@ mod test {
             ivfc_level.write(0, &init).unwrap();
             let plain = MemoryFile::new(init);
 
-            for _ in 0..100 {
+            for _ in 0..1000 {
                 let operation = rng.gen_range(1, 10);
                 if operation == 1 {
                     ivfc_level.commit().unwrap();
-                    ivfc_level = IvfcLevel::new(hash.clone(), data.clone(), block_len);
+                    ivfc_level = IvfcLevel::new(hash.clone(), data.clone(), block_len).unwrap();
                 } else if operation < 4 {
                     ivfc_level.commit().unwrap();
                 } else {

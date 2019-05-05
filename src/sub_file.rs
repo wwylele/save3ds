@@ -8,19 +8,25 @@ pub struct SubFile {
 }
 
 impl SubFile {
-    pub fn new(parent: Rc<RandomAccessFile>, begin: usize, len: usize) -> SubFile {
-        assert!(begin + len <= parent.len());
-        SubFile { parent, begin, len }
+    pub fn new(parent: Rc<RandomAccessFile>, begin: usize, len: usize) -> Result<SubFile, Error> {
+        if begin + len > parent.len() {
+            return make_error(Error::OutOfBound);
+        }
+        Ok(SubFile { parent, begin, len })
     }
 }
 
 impl RandomAccessFile for SubFile {
     fn read(&self, pos: usize, buf: &mut [u8]) -> Result<(), Error> {
-        assert!(pos + buf.len() <= self.len);
+        if pos + buf.len() > self.len() {
+            return make_error(Error::OutOfBound);
+        }
         self.parent.read(pos + self.begin, buf)
     }
     fn write(&self, pos: usize, buf: &[u8]) -> Result<(), Error> {
-        assert!(pos + buf.len() <= self.len);
+        if pos + buf.len() > self.len() {
+            return make_error(Error::OutOfBound);
+        }
         self.parent.write(pos + self.begin, buf)
     }
     fn len(&self) -> usize {

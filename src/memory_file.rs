@@ -16,13 +16,17 @@ impl MemoryFile {
 impl RandomAccessFile for MemoryFile {
     fn read(&self, pos: usize, buf: &mut [u8]) -> Result<(), Error> {
         let data = self.data.borrow();
-        assert!(pos + buf.len() <= data.len());
+        if pos + buf.len() > data.len() {
+            return make_error(Error::OutOfBound);
+        }
         buf.copy_from_slice(&data[pos..pos + buf.len()]);
         Ok(())
     }
     fn write(&self, pos: usize, buf: &[u8]) -> Result<(), Error> {
         let mut data = self.data.borrow_mut();
-        assert!(pos + buf.len() <= data.len());
+        if pos + buf.len() > data.len() {
+            return make_error(Error::OutOfBound);
+        }
         data[pos..pos + buf.len()].copy_from_slice(&buf);
         Ok(())
     }

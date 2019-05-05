@@ -20,14 +20,18 @@ impl DiskFile {
 
 impl RandomAccessFile for DiskFile {
     fn read(&self, pos: usize, buf: &mut [u8]) -> Result<(), Error> {
-        assert!(pos + buf.len() <= self.len());
+        if pos + buf.len() > self.len() {
+            return make_error(Error::OutOfBound);
+        }
         let mut file = self.file.borrow_mut();
         file.seek(std::io::SeekFrom::Start(pos as u64))?;
         file.read_exact(buf)?;
         Ok(())
     }
     fn write(&self, pos: usize, buf: &[u8]) -> Result<(), Error> {
-        assert!(pos + buf.len() <= self.len());
+        if pos + buf.len() > self.len() {
+            return make_error(Error::OutOfBound);
+        }
         let mut file = self.file.borrow_mut();
         file.seek(std::io::SeekFrom::Start(pos as u64))?;
         file.write_all(buf)?;

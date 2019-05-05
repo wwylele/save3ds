@@ -15,27 +15,33 @@ impl DpfsLevel {
         selector: Rc<RandomAccessFile>,
         pair: [Rc<RandomAccessFile>; 2],
         block_len: usize,
-    ) -> DpfsLevel {
+    ) -> Result<DpfsLevel, Error> {
         let len = pair[0].len();
-        assert_eq!(pair[1].len(), len);
+        if pair[1].len() != len {
+            return make_error(Error::SizeMismatch);
+        }
         let block_count = 1 + (len - 1) / block_len;
         let chunk_count = 1 + (block_count - 1) / 32;
-        assert_eq!(chunk_count * 4, selector.len());
+        if chunk_count * 4 > selector.len() {
+            return make_error(Error::SizeMismatch);
+        }
 
-        DpfsLevel {
+        Ok(DpfsLevel {
             selector,
             pair,
             block_len,
             len,
             dirty: RefCell::new(vec![0; chunk_count]),
-        }
+        })
     }
 }
 
 impl RandomAccessFile for DpfsLevel {
     fn read(&self, pos: usize, buf: &mut [u8]) -> Result<(), Error> {
         let end = pos + buf.len();
-        assert!(end <= self.len());
+        if end > self.len() {
+            return make_error(Error::OutOfBound);
+        }
 
         // block index range the operation covers
         let begin_block = pos / self.block_len;
@@ -62,7 +68,7 @@ impl RandomAccessFile for DpfsLevel {
 
             for block_i in block_i_begin..block_i_end {
                 // the partition we are going to read from
-                let select_bit = (select >> (block_i - chunk_i * 32)) & 1;
+                let select_bit = (select >> (31 - (block_i - chunk_i * 32))) & 1;
 
                 // data range we operate on within this block
                 let data_begin = std::cmp::max(block_i * self.block_len, pos);
@@ -78,7 +84,9 @@ impl RandomAccessFile for DpfsLevel {
     }
     fn write(&self, pos: usize, buf: &[u8]) -> Result<(), Error> {
         let end = pos + buf.len();
-        assert!(end <= self.len());
+        if end > self.len() {
+            return make_error(Error::OutOfBound);
+        }
 
         // block index range the operation covers
         let begin_block = pos / self.block_len;
@@ -105,7 +113,7 @@ impl RandomAccessFile for DpfsLevel {
 
             for block_i in block_i_begin..block_i_end {
                 // the partition (inactive partition) we are going to write to
-                let shift = block_i - chunk_i * 32;
+                let shift = 31 - (block_i - chunk_i * 32);
                 let select_bit = (select >> shift) & 1;
 
                 // data range this block covers
@@ -176,7 +184,7 @@ mod test {
 
     #[test] #[rustfmt::skip]
     fn test() {
-        let selector = Rc::new(MemoryFile::new(vec![0x00, 0xFF, 0xF0, 0x0F, 0xAA, 0xAA, 0x55, 0x05]));
+        let selector = Rc::new(MemoryFile::new(vec![0xF0, 0x0F, 0xFF, 0x00, 0xA0, 0xAA, 0x55, 0x55]));
         let pair: [Rc<RandomAccessFile>; 2] = [Rc::new(MemoryFile::new(vec![
             0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
             0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
@@ -219,7 +227,7 @@ mod test {
             0x00,
         ]))];
 
-        let file = DpfsLevel::new(selector.clone(), pair.clone(), 2);
+        let file = DpfsLevel::new(selector.clone(), pair.clone(), 2).unwrap();
         assert_eq!(file.len(), 128 - 7);
         let mut buf1 = [0; 16];
         file.read(65, &mut buf1).unwrap();
@@ -236,7 +244,7 @@ mod test {
         file.commit().unwrap();
         file.read(99, &mut buf3).unwrap();
         assert_eq!(buf3, [0xFF, 0x11, 0x22, 0x33, 0x44, 0x55, 0x00]);
-        let file = DpfsLevel::new(selector, pair, 2);
+        let file = DpfsLevel::new(selector, pair, 2).unwrap();
         file.read(99, &mut buf3).unwrap();
         assert_eq!(buf3, [0xFF, 0x11, 0x22, 0x33, 0x44, 0x55, 0x00]);
     }
@@ -265,15 +273,15 @@ mod test {
                 )),
             ];
             let init: Vec<u8> = rng.sample_iter(&Standard).take(len).collect();
-            let mut dpfs_level = DpfsLevel::new(selector.clone(), pair.clone(), block_len);
+            let mut dpfs_level = DpfsLevel::new(selector.clone(), pair.clone(), block_len).unwrap();
             dpfs_level.write(0, &init).unwrap();
             let plain = MemoryFile::new(init);
 
-            for _ in 0..100 {
+            for _ in 0..1000 {
                 let operation = rng.gen_range(1, 10);
                 if operation == 1 {
                     dpfs_level.commit().unwrap();
-                    dpfs_level = DpfsLevel::new(selector.clone(), pair.clone(), block_len);
+                    dpfs_level = DpfsLevel::new(selector.clone(), pair.clone(), block_len).unwrap();
                 } else if operation < 4 {
                     dpfs_level.commit().unwrap();
                 } else {
