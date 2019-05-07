@@ -82,7 +82,7 @@ impl DifiPartition {
         descriptor: Rc<RandomAccessFile>,
         partition: Rc<RandomAccessFile>,
     ) -> Result<DifiPartition, Error> {
-        let header: DifiHeader = descriptor.read_struct(0)?;
+        let header: DifiHeader = read_struct(descriptor.as_ref(), 0)?;
 
         if header.magic != *b"DIFI" || header.version != 0x10000 {
             return make_error(Error::MagicMismatch);
@@ -92,7 +92,7 @@ impl DifiPartition {
             return make_error(Error::SizeMismatch);
         }
         let ivfc: IvfcDescriptor =
-            descriptor.read_struct(header.ivfc_descriptor_offset as usize)?;
+            read_struct(descriptor.as_ref(), header.ivfc_descriptor_offset as usize)?;
         if ivfc.magic != *b"IVFC" || ivfc.version != 0x20000 {
             return make_error(Error::MagicMismatch);
         }
@@ -104,7 +104,7 @@ impl DifiPartition {
             return make_error(Error::SizeMismatch);
         }
         let dpfs: DpfsDescriptor =
-            descriptor.read_struct(header.dpfs_descriptor_offset as usize)?;
+            read_struct(descriptor.as_ref(), header.dpfs_descriptor_offset as usize)?;
         if dpfs.magic != *b"DPFS" || dpfs.version != 0x10000 {
             return make_error(Error::MagicMismatch);
         }

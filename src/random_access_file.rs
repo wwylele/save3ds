@@ -1,4 +1,5 @@
 use byte_struct::*;
+use std::borrow::Borrow;
 
 #[derive(Debug)]
 pub enum Error {
@@ -8,6 +9,8 @@ pub enum Error {
     MagicMismatch,
     SizeMismatch,
     InvalidValue,
+    BrokenFat,
+    NoSpace,
 }
 
 impl From<std::io::Error> for Error {
@@ -18,6 +21,7 @@ impl From<std::io::Error> for Error {
 
 pub fn make_error<T>(e: Error) -> Result<T, Error> {
     //println!("Error thrown: {:?}", e);
+    //panic!();
     Err(e)
 }
 
@@ -28,17 +32,15 @@ pub trait RandomAccessFile {
     fn commit(&self) -> Result<(), Error>;
 }
 
-impl RandomAccessFile {
-    pub fn read_struct<T: ByteStruct>(&self, pos: usize) -> Result<T, Error> {
-        let mut buf = vec![0; T::BYTE_LEN]; // array somehow broken with the associated item as size
-        self.read(pos, &mut buf)?;
-        Ok(T::read_bytes(&buf))
-    }
+pub fn read_struct<T: ByteStruct>(f: &RandomAccessFile, pos: usize) -> Result<T, Error> {
+    let mut buf = vec![0; T::BYTE_LEN]; // array somehow broken with the associated item as size
+    f.borrow().read(pos, &mut buf)?;
+    Ok(T::read_bytes(&buf))
+}
 
-    pub fn write_struct<T: ByteStruct>(&self, pos: usize, data: T) -> Result<(), Error> {
-        let mut buf = vec![0; T::BYTE_LEN]; // array somehow broken with the associated item as size
-        data.write_bytes(&mut buf);
-        self.write(pos, &buf)?;
-        Ok(())
-    }
+pub fn write_struct<T: ByteStruct>(f: &RandomAccessFile, pos: usize, data: T) -> Result<(), Error> {
+    let mut buf = vec![0; T::BYTE_LEN]; // array somehow broken with the associated item as size
+    data.write_bytes(&mut buf);
+    f.borrow().write(pos, &buf)?;
+    Ok(())
 }

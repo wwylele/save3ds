@@ -46,8 +46,7 @@ pub struct Disa {
 impl Disa {
     pub fn new(file: Rc<RandomAccessFile>) -> Result<Disa, Error> {
         let header_file = Rc::new(SubFile::new(file.clone(), 0x100, 0x100)?); // TODO: link with CMAC
-        let header: DisaHeader =
-            (header_file.clone().as_ref() as &RandomAccessFile).read_struct(0)?;
+        let header: DisaHeader = read_struct(header_file.as_ref(), 0)?;
         if header.magic != *b"DISA" || header.version != 0x40000 {
             return make_error(Error::MagicMismatch);
         }
