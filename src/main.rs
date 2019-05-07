@@ -6,6 +6,7 @@ mod disk_file;
 mod dpfs_level;
 mod dual_file;
 mod fat;
+mod fs;
 mod ivfc_level;
 mod memory_file;
 mod random_access_file;
