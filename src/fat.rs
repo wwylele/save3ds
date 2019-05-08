@@ -18,7 +18,7 @@ struct Entry {
     v: EntryHalf,
 }
 
-struct Fat {
+pub struct Fat {
     table: Rc<RandomAccessFile>,
     data: Rc<RandomAccessFile>,
     block_len: usize,
@@ -306,7 +306,7 @@ impl Fat {
     }
 }
 
-struct FatFile {
+pub struct FatFile {
     fat: Rc<Fat>,
     block_list: Vec<BlockMap>,
 }

@@ -159,19 +159,19 @@ impl<KeyType: ByteStruct + PartialEq, InfoType: ByteStruct> MetaTable<KeyType, I
     }
 }
 
-trait ParentedKey: ByteStruct + PartialEq + Clone {
+pub trait ParentedKey: ByteStruct + PartialEq + Clone {
     type NameType;
     fn get_parent(&self) -> u32;
     fn get_name(&self) -> Self::NameType;
     fn new(parent: u32, name: Self::NameType) -> Self;
 }
 
-trait FileInfo: ByteStruct + Clone {
+pub trait FileInfo: ByteStruct + Clone {
     fn set_next(&mut self, index: u32);
     fn get_next(&self) -> u32;
 }
 
-trait DirInfo: ByteStruct + Clone {
+pub trait DirInfo: ByteStruct + Clone {
     fn set_sub_dir(&mut self, index: u32);
     fn get_sub_dir(&self) -> u32;
     fn set_sub_file(&mut self, index: u32);
@@ -180,7 +180,7 @@ trait DirInfo: ByteStruct + Clone {
     fn get_next(&self) -> u32;
 }
 
-struct FsMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType> {
+pub struct FsMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType> {
     dirs: MetaTable<DirKeyType, DirInfoType>,
     files: MetaTable<FileKeyType, FileInfoType>,
 }
@@ -205,7 +205,7 @@ impl<
     }
 }
 
-struct FileMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType> {
+pub struct FileMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType> {
     key: FileKeyType,
     pos: u32,
     fs: Rc<FsMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>>,
@@ -218,7 +218,15 @@ impl<
         FileInfoType: FileInfo,
     > FileMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>
 {
-    fn delete(self) -> Result<(), Error> {
+    pub fn get_info(&self) -> Result<FileInfoType, Error> {
+        Ok(self.fs.files.get_at(self.pos)?.0)
+    }
+
+    pub fn set_info(&self, info: FileInfoType) -> Result<(), Error> {
+        self.fs.files.set(self.pos, info)
+    }
+
+    pub fn delete(self) -> Result<(), Error> {
         let (self_info, _) = self.fs.files.get_at(self.pos)?;
 
         let parent_index = self.key.get_parent();
@@ -247,7 +255,7 @@ impl<
     }
 }
 
-struct DirMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType> {
+pub struct DirMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType> {
     key: DirKeyType,
     pos: u32,
     fs: Rc<FsMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>>,
@@ -260,14 +268,14 @@ impl<
         FileInfoType: FileInfo,
     > DirMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>
 {
-    fn open_root(
+    pub fn open_root(
         fs: Rc<FsMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>>,
     ) -> Result<Self, Error> {
         let (_, key) = fs.dirs.get_at(1)?;
         Ok(DirMeta { key, pos: 1, fs })
     }
 
-    fn open_sub_dir(&self, name: DirKeyType::NameType) -> Result<Self, Error> {
+    pub fn open_sub_dir(&self, name: DirKeyType::NameType) -> Result<Self, Error> {
         let key = DirKeyType::new(self.pos, name);
         let (_, pos) = self.fs.dirs.get(&key)?;
         Ok(DirMeta {
@@ -277,7 +285,7 @@ impl<
         })
     }
 
-    fn open_sub_file(
+    pub fn open_sub_file(
         &self,
         name: FileKeyType::NameType,
     ) -> Result<FileMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>, Error> {
@@ -290,31 +298,31 @@ impl<
         })
     }
 
-    fn list_sub_dir(&self) -> Result<Vec<DirKeyType>, Error> {
+    pub fn list_sub_dir(&self) -> Result<Vec<DirKeyType::NameType>, Error> {
         let (self_info, _) = self.fs.dirs.get_at(self.pos)?;
         let mut index = self_info.get_sub_dir();
         let mut result = vec![];
         while index != 0 {
             let (info, key) = self.fs.dirs.get_at(index)?;
-            result.push(key);
+            result.push(key.get_name());
             index = info.get_next();
         }
         Ok(result)
     }
 
-    fn list_sub_file(&self) -> Result<Vec<FileKeyType>, Error> {
+    pub fn list_sub_file(&self) -> Result<Vec<FileKeyType::NameType>, Error> {
         let (self_info, _) = self.fs.dirs.get_at(self.pos)?;
         let mut index = self_info.get_sub_file();
         let mut result = vec![];
         while index != 0 {
             let (info, key) = self.fs.files.get_at(index)?;
-            result.push(key);
+            result.push(key.get_name());
             index = info.get_next();
         }
         Ok(result)
     }
 
-    fn new_sub_dir(
+    pub fn new_sub_dir(
         &self,
         name: DirKeyType::NameType,
         mut info: DirInfoType,
@@ -334,7 +342,7 @@ impl<
         })
     }
 
-    fn new_sub_file(
+    pub fn new_sub_file(
         &self,
         name: FileKeyType::NameType,
         mut info: FileInfoType,
@@ -352,7 +360,7 @@ impl<
         })
     }
 
-    fn delete(self) -> Result<Option<Self>, Error> {
+    pub fn delete(self) -> Result<Option<Self>, Error> {
         let (self_info, _) = self.fs.dirs.get_at(self.pos)?;
         if self.pos == 1 {
             return make_error(Error::DeletingRoot);
@@ -392,26 +400,26 @@ impl<
 
 #[derive(ByteStruct, Clone)]
 #[byte_struct_le]
-struct SaveDir {
-    next: u32,
-    sub_dir: u32,
-    sub_file: u32,
-    padding: u32,
+pub struct SaveDir {
+    pub next: u32,
+    pub sub_dir: u32,
+    pub sub_file: u32,
+    pub padding: u32,
 }
 
 #[derive(ByteStruct, Clone)]
 #[byte_struct_le]
-struct SaveFile {
-    next: u32,
-    padding1: u32,
-    block: u32,
-    size: u64,
-    padding2: u32,
+pub struct SaveFile {
+    pub next: u32,
+    pub padding1: u32,
+    pub block: u32,
+    pub size: u64,
+    pub padding2: u32,
 }
 
 #[derive(ByteStruct, Clone, PartialEq)]
 #[byte_struct_le]
-struct SaveKey {
+pub struct SaveKey {
     parent: u32,
     name: [u8; 16],
 }
@@ -654,23 +662,13 @@ mod test {
                         let index = rng.gen_range(0, dirs.len());
                         assert_eq!(
                             HashSet::from_iter(
-                                dirs[index]
-                                    .meta
-                                    .list_sub_dir()
-                                    .unwrap()
-                                    .into_iter()
-                                    .map(|k| k.name)
+                                dirs[index].meta.list_sub_dir().unwrap().into_iter()
                             ),
                             dirs[index].sub_dir_name
                         );
                         assert_eq!(
                             HashSet::from_iter(
-                                dirs[index]
-                                    .meta
-                                    .list_sub_file()
-                                    .unwrap()
-                                    .into_iter()
-                                    .map(|k| k.name)
+                                dirs[index].meta.list_sub_file().unwrap().into_iter()
                             ),
                             dirs[index].sub_file_name
                         );

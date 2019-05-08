@@ -52,6 +52,7 @@ impl IvfcLevel {
 
 impl RandomAccessFile for IvfcLevel {
     fn read(&self, pos: usize, buf: &mut [u8]) -> Result<(), Error> {
+        let mut result = Ok(());
         let end = pos + buf.len();
         if end > self.len() {
             return make_error(Error::OutOfBound);
@@ -62,43 +63,62 @@ impl RandomAccessFile for IvfcLevel {
         let end_block = 1 + (end - 1) / self.block_len;
 
         for i in begin_block..end_block {
+            let mut broken = false;
+            let mut block_buf = vec![0; self.block_len];
+
             // data range of this block
             let data_begin_as_block = i * self.block_len;
             let data_end_as_block = std::cmp::min((i + 1) * self.block_len, self.len);
 
             let status = self.get_status(i);
             if status == BLOCK_BROKEN {
-                return make_error(Error::HashMismatch);
-            }
-
-            let mut block_buf = vec![0; self.block_len];
-            self.data.read(
-                data_begin_as_block,
-                &mut block_buf[0..data_end_as_block - data_begin_as_block],
-            )?;
-            if status == BLOCK_UNVERIFIED {
-                let mut hasher = Sha256::new();
-                hasher.input(&block_buf);
-                let hash = hasher.result();
-                let mut hash_stored = [0; 0x20];
-                self.hash.read(i * 0x20, &mut hash_stored)?;
-                if hash[..] != hash_stored[..] {
-                    self.set_status(i, BLOCK_BROKEN);
-                    return make_error(Error::HashMismatch);
+                result = make_error(Error::HashMismatch);
+                broken = true;
+            } else {
+                self.data.read(
+                    data_begin_as_block,
+                    &mut block_buf[0..data_end_as_block - data_begin_as_block],
+                )?;
+                if status == BLOCK_UNVERIFIED {
+                    let mut hash_stored = [0; 0x20];
+                    match self.hash.read(i * 0x20, &mut hash_stored) {
+                        Ok(()) => {
+                            let mut hasher = Sha256::new();
+                            hasher.input(&block_buf);
+                            let hash = hasher.result();
+                            if hash[..] != hash_stored[..] {
+                                self.set_status(i, BLOCK_BROKEN);
+                                result = make_error(Error::HashMismatch);
+                                broken = true;
+                            } else {
+                                self.set_status(i, BLOCK_VERIFIED);
+                            }
+                        }
+                        Err(_) => {
+                            self.set_status(i, BLOCK_BROKEN);
+                            result = make_error(Error::HashMismatch);
+                            broken = true;
+                        }
+                    }
                 }
-                self.set_status(i, BLOCK_VERIFIED);
             }
 
             // data range to read within this block
             let data_begin = std::cmp::max(data_begin_as_block, pos);
             let data_end = std::cmp::min(data_end_as_block, end);
 
-            buf[data_begin - pos..data_end - pos].copy_from_slice(
-                &block_buf[data_begin - data_begin_as_block..data_end - data_begin_as_block],
-            );
+            if broken {
+                for i in buf[data_begin - pos..data_end - pos].iter_mut() {
+                    *i = 0xDD;
+                }
+            } else {
+                buf[data_begin - pos..data_end - pos].copy_from_slice(
+                    &block_buf[data_begin - data_begin_as_block..data_end - data_begin_as_block],
+                );
+            }
         }
 
-        Ok(())
+        result
     }
     fn write(&self, pos: usize, buf: &[u8]) -> Result<(), Error> {
         let end = pos + buf.len();

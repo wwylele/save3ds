@@ -24,7 +24,7 @@ impl From<std::io::Error> for Error {
 
 pub fn make_error<T>(e: Error) -> Result<T, Error> {
     //println!("Error thrown: {:?}", e);
-    //panic!();
+    // panic!();
     Err(e)
 }
 
