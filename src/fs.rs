@@ -205,6 +205,48 @@ impl<
     }
 }
 
+struct FileMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType> {
+    key: FileKeyType,
+    pos: u32,
+    fs: Rc<FsMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>>,
+}
+
+impl<
+        DirKeyType: ParentedKey,
+        DirInfoType: DirInfo,
+        FileKeyType: ParentedKey,
+        FileInfoType: FileInfo,
+    > FileMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>
+{
+    fn delete(self) -> Result<(), Error> {
+        let (self_info, _) = self.fs.files.get_at(self.pos)?;
+
+        let parent_index = self.key.get_parent();
+        let (mut parent, _) = self.fs.dirs.get_at(parent_index)?;
+        let mut head_index = parent.get_sub_file();
+        if head_index == self.pos {
+            parent.set_sub_file(self_info.get_next());
+            self.fs.dirs.set(parent_index, parent)?;
+        } else {
+            loop {
+                assert!(head_index != 0);
+                let (mut head, _) = self.fs.files.get_at(head_index)?;
+                let next_index = head.get_next();
+                if next_index == self.pos {
+                    head.set_next(self_info.get_next());
+                    self.fs.files.set(head_index, head)?;
+                    break;
+                }
+                head_index = next_index;
+            }
+        }
+
+        self.fs.files.remove(self.pos)?;
+
+        Ok(())
+    }
+}
+
 struct DirMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType> {
     key: DirKeyType,
     pos: u32,
@@ -235,12 +277,37 @@ impl<
         })
     }
 
+    fn open_sub_file(
+        &self,
+        name: FileKeyType::NameType,
+    ) -> Result<FileMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>, Error> {
+        let key = FileKeyType::new(self.pos, name);
+        let (_, pos) = self.fs.files.get(&key)?;
+        Ok(FileMeta {
+            key,
+            pos,
+            fs: self.fs.clone(),
+        })
+    }
+
     fn list_sub_dir(&self) -> Result<Vec<DirKeyType>, Error> {
         let (self_info, _) = self.fs.dirs.get_at(self.pos)?;
         let mut index = self_info.get_sub_dir();
         let mut result = vec![];
         while index != 0 {
             let (info, key) = self.fs.dirs.get_at(index)?;
+            result.push(key);
+            index = info.get_next();
+        }
+        Ok(result)
+    }
+
+    fn list_sub_file(&self) -> Result<Vec<FileKeyType>, Error> {
+        let (self_info, _) = self.fs.dirs.get_at(self.pos)?;
+        let mut index = self_info.get_sub_file();
+        let mut result = vec![];
+        while index != 0 {
+            let (info, key) = self.fs.files.get_at(index)?;
             result.push(key);
             index = info.get_next();
         }
@@ -257,10 +324,28 @@ impl<
         info.set_next(self_info.get_sub_dir());
         info.set_sub_dir(0);
         info.set_sub_file(0);
-        let pos = self.fs.dirs.add(key.clone(), info.clone())?;
+        let pos = self.fs.dirs.add(key.clone(), info)?;
         self_info.set_sub_dir(pos);
         self.fs.dirs.set(self.pos, self_info.clone())?;
         Ok(DirMeta {
+            key,
+            pos,
+            fs: self.fs.clone(),
+        })
+    }
+
+    fn new_sub_file(
+        &self,
+        name: FileKeyType::NameType,
+        mut info: FileInfoType,
+    ) -> Result<FileMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>, Error> {
+        let (mut self_info, _) = self.fs.dirs.get_at(self.pos)?;
+        let key = FileKeyType::new(self.pos, name);
+        info.set_next(self_info.get_sub_file());
+        let pos = self.fs.files.add(key.clone(), info)?;
+        self_info.set_sub_file(pos);
+        self.fs.dirs.set(self.pos, self_info.clone())?;
+        Ok(FileMeta {
             key,
             pos,
             fs: self.fs.clone(),
@@ -388,6 +473,7 @@ mod test {
         assert_eq!(SaveFile::BYTE_LEN, 24);
     }
 
+    #[allow(clippy::cyclomatic_complexity)]
     #[test]
     fn fs_fuzz() {
         let mut rng = rand::thread_rng();
@@ -440,10 +526,10 @@ mod test {
 
             write_struct(file_table.as_ref(), 0, U32le { v: 1 }).unwrap();
             write_struct(
-                dir_table.as_ref(),
+                file_table.as_ref(),
                 4,
                 U32le {
-                    v: dir_entry_count as u32,
+                    v: file_entry_count as u32,
                 },
             )
             .unwrap();
@@ -457,7 +543,14 @@ mod test {
                 meta: DirMeta<SaveKey, SaveDir, SaveKey, SaveFile>,
                 name: [u8; 16],
                 parent: usize,
-                children_name: HashSet<[u8; 16]>,
+                sub_dir_name: HashSet<[u8; 16]>,
+                sub_file_name: HashSet<[u8; 16]>,
+            }
+
+            struct File {
+                meta: FileMeta<SaveKey, SaveDir, SaveKey, SaveFile>,
+                name: [u8; 16],
+                parent: usize,
             }
 
             let mut dirs = vec![Dir {
@@ -465,11 +558,14 @@ mod test {
                     .unwrap(),
                 name: [0; 16],
                 parent: 0xFFFF_FFFF,
-                children_name: HashSet::new(),
+                sub_dir_name: HashSet::new(),
+                sub_file_name: HashSet::new(),
             }];
 
+            let mut files: Vec<File> = vec![];
+
             for _ in 0..1000 {
-                match rng.gen_range(0, 4) {
+                match rng.gen_range(0, 7) {
                     0 => {
                         // open_sub_dir
                         if dirs.len() == 1 {
@@ -486,7 +582,7 @@ mod test {
                         let parent = rng.gen_range(0, dirs.len());
                         let name = loop {
                             let name: [u8; 16] = rng.gen();
-                            if !dirs[parent].children_name.contains(&name) {
+                            if !dirs[parent].sub_dir_name.contains(&name) {
                                 break name;
                             }
                         };
@@ -502,19 +598,20 @@ mod test {
                             Err(Error::NoSpace) => assert_eq!(dirs.len(), dir_entry_count - 1),
                             Ok(meta) => {
                                 assert!(dirs.len() < dir_entry_count - 1);
-                                assert!(dirs[parent].children_name.insert(name));
+                                assert!(dirs[parent].sub_dir_name.insert(name));
                                 dirs.push(Dir {
                                     meta,
                                     name,
                                     parent,
-                                    children_name: HashSet::new(),
+                                    sub_dir_name: HashSet::new(),
+                                    sub_file_name: HashSet::new(),
                                 })
                             }
                             _ => unreachable!(),
                         }
                     }
                     2 => {
-                        // delete
+                        // delete dir
                         if dirs.len() == 1 {
                             continue;
                         }
@@ -522,20 +619,30 @@ mod test {
                         let mut dir = dirs.remove(index);
                         match dir.meta.delete() {
                             Ok(None) => {
-                                assert!(dir.children_name.is_empty());
+                                assert!(
+                                    dir.sub_dir_name.is_empty() && dir.sub_file_name.is_empty()
+                                );
                                 let mut parent = dir.parent;
                                 if parent > index {
                                     parent -= 1;
                                 }
-                                assert!(dirs[parent].children_name.remove(&dir.name));
+                                assert!(dirs[parent].sub_dir_name.remove(&dir.name));
                                 for dir in dirs.iter_mut() {
                                     if dir.parent > index && dir.parent != 0xFFFF_FFFF {
                                         dir.parent -= 1;
                                     }
                                 }
+
+                                for file in files.iter_mut() {
+                                    if file.parent > index {
+                                        file.parent -= 1;
+                                    }
+                                }
                             }
                             Ok(Some(meta)) => {
-                                assert!(!dir.children_name.is_empty());
+                                assert!(
+                                    !dir.sub_dir_name.is_empty() || !dir.sub_file_name.is_empty()
+                                );
                                 dir.meta = meta;
                                 dirs.insert(index, dir);
                             }
@@ -554,8 +661,69 @@ mod test {
                                     .into_iter()
                                     .map(|k| k.name)
                             ),
-                            dirs[index].children_name
+                            dirs[index].sub_dir_name
                         );
+                        assert_eq!(
+                            HashSet::from_iter(
+                                dirs[index]
+                                    .meta
+                                    .list_sub_file()
+                                    .unwrap()
+                                    .into_iter()
+                                    .map(|k| k.name)
+                            ),
+                            dirs[index].sub_file_name
+                        );
+                    }
+                    4 => {
+                        // open_sub_file
+                        if files.is_empty() {
+                            continue;
+                        }
+                        let index = rng.gen_range(0, files.len());
+                        files[index].meta = dirs[files[index].parent]
+                            .meta
+                            .open_sub_file(files[index].name)
+                            .unwrap();
+                    }
+                    5 => {
+                        // new_sub_file
+                        let parent = rng.gen_range(0, dirs.len());
+                        let name = loop {
+                            let name: [u8; 16] = rng.gen();
+                            if !dirs[parent].sub_file_name.contains(&name) {
+                                break name;
+                            }
+                        };
+                        match dirs[parent].meta.new_sub_file(
+                            name,
+                            SaveFile {
+                                padding1: 0,
+                                block: 0,
+                                size: 0,
+                                padding2: 0,
+                                next: 0,
+                            },
+                        ) {
+                            Err(Error::NoSpace) => assert_eq!(files.len(), file_entry_count - 1),
+                            Ok(meta) => {
+                                assert!(files.len() < file_entry_count - 1);
+                                assert!(dirs[parent].sub_file_name.insert(name));
+                                files.push(File { meta, name, parent })
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                    6 => {
+                        // delete file
+                        if files.is_empty() {
+                            continue;
+                        }
+                        let index = rng.gen_range(0, files.len());
+                        let file = files.remove(index);
+                        file.meta.delete().unwrap();
+                        let parent = file.parent;
+                        assert!(dirs[parent].sub_file_name.remove(&file.name));
                     }
                     _ => unreachable!(),
                 }
