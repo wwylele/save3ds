@@ -11,6 +11,9 @@ pub enum Error {
     InvalidValue,
     BrokenFat,
     NoSpace,
+    NotFound,
+    AlreadyExist,
+    DeletingRoot,
 }
 
 impl From<std::io::Error> for Error {
