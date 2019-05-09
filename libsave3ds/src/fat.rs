@@ -1,3 +1,4 @@
+use crate::error::*;
 use crate::random_access_file::*;
 use byte_struct::*;
 use std::cell::Cell;
@@ -22,7 +23,6 @@ pub struct Fat {
     table: Rc<RandomAccessFile>,
     data: Rc<RandomAccessFile>,
     block_len: usize,
-    block_count: usize,
     free_blocks: Cell<usize>,
 }
 
@@ -300,7 +300,6 @@ impl Fat {
             table,
             data,
             block_len,
-            block_count,
             free_blocks: Cell::new(free_blocks),
         }))
     }

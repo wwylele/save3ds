@@ -1,3 +1,4 @@
+use crate::error::*;
 use crate::random_access_file::*;
 use std::cell::RefCell;
 use std::rc::Rc;

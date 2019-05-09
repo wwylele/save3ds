@@ -1,23 +1,7 @@
-#![allow(dead_code)]
-
-mod difi_partition;
-mod disa;
-mod disk_file;
-mod dpfs_level;
-mod dual_file;
-mod fat;
-mod fs;
-mod ivfc_level;
-mod memory_file;
-mod random_access_file;
-mod save_data;
-mod sub_file;
-
-use disk_file::DiskFile;
 use fuse::*;
 use libc::{EBADF, EIO, EISDIR, ENOENT, ENOTDIR};
-use random_access_file::*;
-use save_data::*;
+use libsave3ds::error::*;
+use libsave3ds::save_data::*;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::rc::Rc;
@@ -306,9 +290,8 @@ impl Filesystem for SaveDataFilesystem {
 
 fn main() {
     println!("Hello, world!");
-    let test_file = std::fs::File::open("/home/wwylele/save3ds/cecd").unwrap();
-    let file = Rc::new(DiskFile::new(test_file).unwrap());
-    let save = SaveData::new(file).unwrap();
+    let file = std::fs::File::open("/home/wwylele/save3ds/cecd").unwrap();
+    let save = SaveData::from_file(file).unwrap();
 
     let fs = SaveDataFilesystem::new(save);
     let options = [];

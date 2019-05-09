@@ -1,6 +1,9 @@
 use crate::disa::Disa;
+use crate::disk_file::DiskFile;
+use crate::error::*;
 use crate::fat::*;
 use crate::fs;
+use crate::memory_file::MemoryFile;
 use crate::random_access_file::*;
 use crate::sub_file::SubFile;
 use byte_struct::*;
@@ -54,7 +57,17 @@ pub struct SaveData {
 }
 
 impl SaveData {
-    pub fn new(file: Rc<RandomAccessFile>) -> Result<Rc<SaveData>, Error> {
+    pub fn from_file(file: std::fs::File) -> Result<Rc<SaveData>, Error> {
+        let file = Rc::new(DiskFile::new(file)?);
+        SaveData::new(file)
+    }
+
+    pub fn from_vec(v: Vec<u8>) -> Result<Rc<SaveData>, Error> {
+        let file = Rc::new(MemoryFile::new(v));
+        SaveData::new(file)
+    }
+
+    fn new(file: Rc<RandomAccessFile>) -> Result<Rc<SaveData>, Error> {
         let disa = Rc::new(Disa::new(file)?);
         let header: SaveHeader = read_struct(disa[0].as_ref(), 0)?;
         if header.magic != *b"SAVE" || header.version != 0x40000 {
@@ -218,26 +231,27 @@ impl File {
 
         Ok(())
     }
-}
 
-impl RandomAccessFile for File {
-    fn read(&self, pos: usize, buf: &mut [u8]) -> Result<(), Error> {
+    pub fn read(&self, pos: usize, buf: &mut [u8]) -> Result<(), Error> {
         if pos + buf.len() > self.len {
             return make_error(Error::OutOfBound);
         }
         self.data.as_ref().unwrap().read(pos, buf)
     }
-    fn write(&self, pos: usize, buf: &[u8]) -> Result<(), Error> {
+
+    pub fn write(&self, pos: usize, buf: &[u8]) -> Result<(), Error> {
         if pos + buf.len() > self.len {
             return make_error(Error::OutOfBound);
         }
         self.data.as_ref().unwrap().write(pos, buf)
     }
-    fn len(&self) -> usize {
+
+    pub fn len(&self) -> usize {
         self.len
     }
-    fn commit(&self) -> Result<(), Error> {
-        Ok(())
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
     }
 }
 

@@ -1,3 +1,4 @@
+use crate::error::*;
 use crate::random_access_file::*;
 use sha2::*;
 use std::cell::RefCell;
@@ -166,6 +167,7 @@ mod test {
     use crate::memory_file::MemoryFile;
     use crate::random_access_file::*;
     use std::rc::Rc;
+    use crate::error::*;
 
     #[test]
     fn fuzz() {

@@ -1,3 +1,4 @@
+use crate::error::*;
 use crate::random_access_file::*;
 use byte_struct::*;
 use std::marker::PhantomData;

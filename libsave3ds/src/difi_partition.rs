@@ -1,5 +1,6 @@
 use crate::dpfs_level::DpfsLevel;
 use crate::dual_file::DualFile;
+use crate::error::*;
 use crate::ivfc_level::IvfcLevel;
 use crate::random_access_file::*;
 use crate::sub_file::SubFile;

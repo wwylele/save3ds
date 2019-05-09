@@ -1,0 +1,11 @@
+[package]
+name = "save3ds_fuse"
+version = "0.1.0"
+authors = ["Weiyi Wang <wwylele@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+libsave3ds = { path = "../libsave3ds" }
+libc = "0.2.54"
+fuse = "0.3.1"
+time = "0.1.42"

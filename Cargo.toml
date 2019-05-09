@@ -1,15 +1,6 @@
-[package]
-name = "save3ds"
-version = "0.1.0"
-authors = ["Weiyi Wang <wwylele@gmail.com>"]
-edition = "2018"
+[workspace]
 
-[dependencies]
-sha2 = "0.8.0"
-aes = "0.3.2"
-ctr = "0.3.2"
-cmac = "0.2.0"
-byte_struct = "0.4.2"
-
-[dev-dependencies]
-rand = "0.6.5"
+members = [
+    "libsave3ds",
+    "save3ds_fuse"
+]
