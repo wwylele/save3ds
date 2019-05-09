@@ -128,6 +128,10 @@ impl SaveData {
             block_len: fs_info.block_len as usize,
         }))
     }
+
+    pub fn commit(&self) -> Result<(), Error> {
+        self.disa.commit()
+    }
 }
 
 pub struct File {
@@ -161,14 +165,27 @@ impl File {
         })
     }
 
-    fn delete(self) -> Result<(), Error> {
+    pub fn open_ino(center: Rc<SaveData>, ino: u32) -> Result<File, Error> {
+        let meta = FileMeta::open_ino(center.fs.clone(), ino)?;
+        File::from_meta(center, meta)
+    }
+
+    pub fn get_parent_ino(&self) -> u32 {
+        self.meta.get_parent_ino()
+    }
+
+    pub fn get_ino(&self) -> u32 {
+        self.meta.get_ino()
+    }
+
+    pub fn delete(self) -> Result<(), Error> {
         if let Some(f) = self.data {
             f.delete()?;
         }
         self.meta.delete()
     }
 
-    fn resize(&mut self, len: usize) -> Result<(), Error> {
+    pub fn resize(&mut self, len: usize) -> Result<(), Error> {
         if len == self.len {
             return Ok(());
         }
@@ -235,6 +252,19 @@ impl Dir {
         Ok(Dir { center, meta })
     }
 
+    pub fn open_ino(center: Rc<SaveData>, ino: u32) -> Result<Dir, Error> {
+        let meta = DirMeta::open_ino(center.fs.clone(), ino)?;
+        Ok(Dir { center, meta })
+    }
+
+    pub fn get_parent_ino(&self) -> u32 {
+        self.meta.get_parent_ino()
+    }
+
+    pub fn get_ino(&self) -> u32 {
+        self.meta.get_ino()
+    }
+
     pub fn open_sub_dir(&self, name: [u8; 16]) -> Result<Dir, Error> {
         Ok(Dir {
             center: self.center.clone(),
@@ -246,11 +276,11 @@ impl Dir {
         File::from_meta(self.center.clone(), self.meta.open_sub_file(name)?)
     }
 
-    pub fn list_sub_dir(&self) -> Result<Vec<[u8; 16]>, Error> {
+    pub fn list_sub_dir(&self) -> Result<Vec<([u8; 16], u32)>, Error> {
         self.meta.list_sub_dir()
     }
 
-    pub fn list_sub_file(&self) -> Result<Vec<[u8; 16]>, Error> {
+    pub fn list_sub_file(&self) -> Result<Vec<([u8; 16], u32)>, Error> {
         self.meta.list_sub_file()
     }
 

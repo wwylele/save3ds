@@ -218,6 +218,22 @@ impl<
         FileInfoType: FileInfo,
     > FileMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>
 {
+    pub fn open_ino(
+        fs: Rc<FsMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>>,
+        ino: u32,
+    ) -> Result<Self, Error> {
+        let (_, key) = fs.files.get_at(ino)?;
+        Ok(FileMeta { key, pos: ino, fs })
+    }
+
+    pub fn get_parent_ino(&self) -> u32 {
+        self.key.get_parent()
+    }
+
+    pub fn get_ino(&self) -> u32 {
+        self.pos
+    }
+
     pub fn get_info(&self) -> Result<FileInfoType, Error> {
         Ok(self.fs.files.get_at(self.pos)?.0)
     }
@@ -275,6 +291,22 @@ impl<
         Ok(DirMeta { key, pos: 1, fs })
     }
 
+    pub fn open_ino(
+        fs: Rc<FsMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>>,
+        ino: u32,
+    ) -> Result<Self, Error> {
+        let (_, key) = fs.dirs.get_at(ino)?;
+        Ok(DirMeta { key, pos: ino, fs })
+    }
+
+    pub fn get_parent_ino(&self) -> u32 {
+        self.key.get_parent()
+    }
+
+    pub fn get_ino(&self) -> u32 {
+        self.pos
+    }
+
     pub fn open_sub_dir(&self, name: DirKeyType::NameType) -> Result<Self, Error> {
         let key = DirKeyType::new(self.pos, name);
         let (_, pos) = self.fs.dirs.get(&key)?;
@@ -298,25 +330,25 @@ impl<
         })
     }
 
-    pub fn list_sub_dir(&self) -> Result<Vec<DirKeyType::NameType>, Error> {
+    pub fn list_sub_dir(&self) -> Result<Vec<(DirKeyType::NameType, u32)>, Error> {
         let (self_info, _) = self.fs.dirs.get_at(self.pos)?;
         let mut index = self_info.get_sub_dir();
         let mut result = vec![];
         while index != 0 {
             let (info, key) = self.fs.dirs.get_at(index)?;
-            result.push(key.get_name());
+            result.push((key.get_name(), index));
             index = info.get_next();
         }
         Ok(result)
     }
 
-    pub fn list_sub_file(&self) -> Result<Vec<FileKeyType::NameType>, Error> {
+    pub fn list_sub_file(&self) -> Result<Vec<(FileKeyType::NameType, u32)>, Error> {
         let (self_info, _) = self.fs.dirs.get_at(self.pos)?;
         let mut index = self_info.get_sub_file();
         let mut result = vec![];
         while index != 0 {
             let (info, key) = self.fs.files.get_at(index)?;
-            result.push(key.get_name());
+            result.push((key.get_name(), index));
             index = info.get_next();
         }
         Ok(result)
@@ -662,13 +694,23 @@ mod test {
                         let index = rng.gen_range(0, dirs.len());
                         assert_eq!(
                             HashSet::from_iter(
-                                dirs[index].meta.list_sub_dir().unwrap().into_iter()
+                                dirs[index]
+                                    .meta
+                                    .list_sub_dir()
+                                    .unwrap()
+                                    .into_iter()
+                                    .map(|n| n.0)
                             ),
                             dirs[index].sub_dir_name
                         );
                         assert_eq!(
                             HashSet::from_iter(
-                                dirs[index].meta.list_sub_file().unwrap().into_iter()
+                                dirs[index]
+                                    .meta
+                                    .list_sub_file()
+                                    .unwrap()
+                                    .into_iter()
+                                    .map(|n| n.0)
                             ),
                             dirs[index].sub_file_name
                         );
