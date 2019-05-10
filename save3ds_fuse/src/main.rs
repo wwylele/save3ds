@@ -490,7 +490,7 @@ impl Filesystem for SaveDataFilesystem {
         };
 
         let newdir = match Ino::from_os(newparent) {
-            Ino::File(ino) => {
+            Ino::File(_) => {
                 reply.error(ENOTDIR);
                 return;
             }
@@ -503,18 +503,38 @@ impl Filesystem for SaveDataFilesystem {
             },
         };
 
-        if let Ok(file) = newdir.open_sub_file(newname_converted) {
-            match file.delete() {
-                Ok(()) => (),
-                Err(_) => {
-                    reply.error(EIO);
-                    return;
+        if let Ok(mut file) = dir.open_sub_file(name_converted) {
+            if let Ok(old_file) = newdir.open_sub_file(newname_converted) {
+                match old_file.delete() {
+                    Ok(()) => (),
+                    Err(_) => {
+                        reply.error(EIO);
+                        return;
+                    }
                 }
             }
-        }
 
-        if let Ok(mut file) = dir.open_sub_file(name_converted) {
             match file.rename(&newdir, newname_converted) {
+                Ok(()) => reply.ok(),
+                Err(Error::AlreadyExist) => reply.error(EEXIST),
+                Err(_) => reply.error(EIO),
+            }
+        } else if let Ok(mut dir) = dir.open_sub_dir(name_converted) {
+            if let Ok(old_dir) = newdir.open_sub_dir(newname_converted) {
+                match old_dir.delete() {
+                    Ok(None) => (),
+                    Ok(Some(_)) => {
+                        reply.error(ENOTEMPTY);
+                        return;
+                    }
+                    Err(_) => {
+                        reply.error(EIO);
+                        return;
+                    }
+                }
+            }
+
+            match dir.rename(&newdir, newname_converted) {
                 Ok(()) => reply.ok(),
                 Err(Error::AlreadyExist) => reply.error(EEXIST),
                 Err(_) => reply.error(EIO),

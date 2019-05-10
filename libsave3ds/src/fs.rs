@@ -314,6 +314,17 @@ impl<
         Ok(DirMeta { key, pos: ino, fs })
     }
 
+    pub fn rename(
+        &mut self,
+        parent: &DirMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>,
+        name: DirKeyType::NameType,
+    ) -> Result<(), Error> {
+        let (info, _) = self.fs.dirs.get_at(self.pos)?;
+        self.delete_impl()?;
+        *self = parent.new_sub_dir_impl(name, info, false)?;
+        Ok(())
+    }
+
     pub fn get_parent_ino(&self) -> u32 {
         self.key.get_parent()
     }
@@ -372,13 +383,24 @@ impl<
     pub fn new_sub_dir(
         &self,
         name: DirKeyType::NameType,
+        info: DirInfoType,
+    ) -> Result<Self, Error> {
+        self.new_sub_dir_impl(name, info, true)
+    }
+
+    fn new_sub_dir_impl(
+        &self,
+        name: DirKeyType::NameType,
         mut info: DirInfoType,
+        reset_sub_info: bool,
     ) -> Result<Self, Error> {
         let (mut self_info, _) = self.fs.dirs.get_at(self.pos)?;
         let key = DirKeyType::new(self.pos, name);
         info.set_next(self_info.get_sub_dir());
-        info.set_sub_dir(0);
-        info.set_sub_file(0);
+        if reset_sub_info {
+            info.set_sub_dir(0);
+            info.set_sub_file(0);
+        }
         let pos = self.fs.dirs.add(key.clone(), info)?;
         self_info.set_sub_dir(pos);
         self.fs.dirs.set(self.pos, self_info.clone())?;
@@ -418,7 +440,12 @@ impl<
         if self_info.get_sub_file() != 0 {
             return Ok(Some(self));
         }
+        self.delete_impl()?;
+        Ok(None)
+    }
 
+    fn delete_impl(&self) -> Result<(), Error> {
+        let (self_info, _) = self.fs.dirs.get_at(self.pos)?;
         let parent_index = self.key.get_parent();
         let (mut parent, _) = self.fs.dirs.get_at(parent_index)?;
         let mut head_index = parent.get_sub_dir();
@@ -440,8 +467,7 @@ impl<
         }
 
         self.fs.dirs.remove(self.pos)?;
-
-        Ok(None)
+        Ok(())
     }
 }
 
@@ -521,6 +547,16 @@ mod test {
     use rand::prelude::*;
     use std::collections::HashSet;
     use std::iter::*;
+
+    fn borrow_mut_two<T>(a: &mut [T], i: usize, j: usize) -> (&mut T, &mut T) {
+        assert!(i != j);
+        if i > j {
+            let (p, q) = borrow_mut_two(a, j, i);
+            return (q, p);
+        }
+        let (m, n) = a.split_at_mut(j);
+        (&mut m[i], &mut n[0])
+    }
 
     #[test]
     fn struct_size() {
@@ -620,7 +656,7 @@ mod test {
             let mut files: Vec<File> = vec![];
 
             for _ in 0..1000 {
-                match rng.gen_range(0, 8) {
+                match rng.gen_range(0, 9) {
                     0 => {
                         // open_sub_dir
                         if dirs.len() == 1 {
@@ -805,6 +841,36 @@ mod test {
                             .sub_file_name
                             .insert(files[index].name));
                         files[index].meta.rename(&dirs[parent].meta, name).unwrap();
+                    }
+
+                    8 => {
+                        // rename dir
+                        if dirs.len() == 1 {
+                            continue;
+                        }
+                        let index = rng.gen_range(1, dirs.len());
+
+                        let parent = rng.gen_range(0, dirs.len());
+                        if parent == index {
+                            continue;
+                        }
+
+                        let name = loop {
+                            let name: [u8; 16] = rng.gen();
+                            if !dirs[parent].sub_file_name.contains(&name) {
+                                break name;
+                            }
+                        };
+
+                        let old_parent = dirs[index].parent;
+                        let old_name = dirs[index].name;
+                        assert!(dirs[old_parent].sub_dir_name.remove(&old_name));
+
+                        dirs[index].name = name;
+                        dirs[index].parent = parent;
+                        assert!(dirs[parent].sub_dir_name.insert(name));
+                        let (a, b) = borrow_mut_two(&mut dirs, index, parent);
+                        a.meta.rename(&b.meta, name).unwrap();
                     }
                     _ => unreachable!(),
                 }

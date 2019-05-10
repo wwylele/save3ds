@@ -313,6 +313,13 @@ impl Dir {
         Ok(Dir { center, meta })
     }
 
+    pub fn rename(&mut self, parent: &Dir, name: [u8; 16]) -> Result<(), Error> {
+        if parent.open_sub_file(name).is_ok() || parent.open_sub_dir(name).is_ok() {
+            return make_error(Error::AlreadyExist);
+        }
+        self.meta.rename(&parent.meta, name)
+    }
+
     pub fn get_parent_ino(&self) -> u32 {
         self.meta.get_parent_ino()
     }
