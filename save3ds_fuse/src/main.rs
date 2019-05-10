@@ -1,9 +1,10 @@
 use fuse::*;
-use libc::{EBADF, EIO, EISDIR, ENOENT, ENOTDIR};
+use libc::{EBADF, EEXIST, EIO, EISDIR, ENOENT, ENOSPC, ENOTDIR, ENOTEMPTY};
 use libsave3ds::error::*;
 use libsave3ds::save_data::*;
 use std::collections::HashMap;
 use std::ffi::OsStr;
+use std::io::{Read, Seek, SeekFrom};
 use std::rc::Rc;
 use time;
 
@@ -23,9 +24,18 @@ impl SaveDataFilesystem {
     }
 }
 
-fn convert_name(name: &[u8; 16]) -> String {
+fn name_3ds_to_str(name: &[u8; 16]) -> String {
     let trimmed: Vec<u8> = name.iter().cloned().take_while(|c| *c != 0).collect();
     std::str::from_utf8(&trimmed).unwrap().to_owned()
+}
+
+fn name_os_to_3ds(name: &OsStr) -> [u8; 16] {
+    // TODO better name conversion
+    let mut name_converted = [0; 16];
+    let utf8 = name.to_str().unwrap().as_bytes();
+    let len = std::cmp::min(16, utf8.len());
+    name_converted[0..len].copy_from_slice(&utf8[0..len]);
+    name_converted
 }
 
 fn make_dir_attr(ino: u64, sub_file_count: usize) -> FileAttr {
@@ -88,13 +98,16 @@ impl Ino {
     }
 }
 
+impl Drop for SaveDataFilesystem {
+    fn drop(&mut self) {
+        self.save.commit().unwrap();
+        println!("Saved");
+    }
+}
+
 impl Filesystem for SaveDataFilesystem {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        // TODO better name conversion
-        let mut name_converted = [0; 16];
-        let utf8 = name.to_str().unwrap().as_bytes();
-        let len = std::cmp::min(16, utf8.len());
-        name_converted[0..len].copy_from_slice(&utf8[0..len]);
+        let name_converted = name_os_to_3ds(name);
 
         match Ino::from_os(parent) {
             Ino::File(_) => {
@@ -167,6 +180,126 @@ impl Filesystem for SaveDataFilesystem {
         }
     }
 
+    fn mkdir(&mut self, _req: &Request, parent: u64, name: &OsStr, _mode: u32, reply: ReplyEntry) {
+        let name_converted = name_os_to_3ds(name);
+        match Ino::from_os(parent) {
+            Ino::File(_) => {
+                reply.error(ENOTDIR);
+            }
+            Ino::Dir(ino) => {
+                let parent_dir = if let Ok(parent_dir) = Dir::open_ino(self.save.clone(), ino) {
+                    parent_dir
+                } else {
+                    reply.error(EIO);
+                    return;
+                };
+                match parent_dir.new_sub_dir(name_converted) {
+                    Ok(child) => reply.entry(
+                        &time::Timespec::new(1, 0),
+                        &make_dir_attr(Ino::Dir(child.get_ino()).to_os(), 0),
+                        0,
+                    ),
+                    Err(Error::AlreadyExist) => reply.error(EEXIST),
+                    Err(Error::NoSpace) => reply.error(ENOSPC),
+                    Err(_) => reply.error(EIO),
+                }
+                return;
+            }
+        }
+    }
+
+    fn mknod(
+        &mut self,
+        _req: &Request,
+        parent: u64,
+        name: &OsStr,
+        _mode: u32,
+        _rdev: u32,
+        reply: ReplyEntry,
+    ) {
+        let name_converted = name_os_to_3ds(name);
+        match Ino::from_os(parent) {
+            Ino::File(_) => {
+                reply.error(ENOTDIR);
+            }
+            Ino::Dir(ino) => {
+                let parent_dir = if let Ok(parent_dir) = Dir::open_ino(self.save.clone(), ino) {
+                    parent_dir
+                } else {
+                    reply.error(EIO);
+                    return;
+                };
+
+                match parent_dir.new_sub_file(name_converted, 0) {
+                    Ok(child) => reply.entry(
+                        &time::Timespec::new(1, 0),
+                        &make_file_attr(Ino::File(child.get_ino()).to_os(), 0),
+                        0,
+                    ),
+                    Err(Error::AlreadyExist) => reply.error(EEXIST),
+                    Err(Error::NoSpace) => reply.error(ENOSPC),
+                    Err(_) => reply.error(EIO),
+                }
+                return;
+            }
+        }
+    }
+
+    fn rmdir(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEmpty) {
+        let name_converted = name_os_to_3ds(name);
+
+        match Ino::from_os(parent) {
+            Ino::File(_) => {
+                reply.error(ENOTDIR);
+            }
+            Ino::Dir(ino) => {
+                let parent_dir = if let Ok(parent_dir) = Dir::open_ino(self.save.clone(), ino) {
+                    parent_dir
+                } else {
+                    reply.error(EIO);
+                    return;
+                };
+
+                if let Ok(child) = parent_dir.open_sub_dir(name_converted) {
+                    match child.delete() {
+                        Ok(None) => reply.ok(),
+                        Ok(Some(_)) => reply.error(ENOTEMPTY),
+                        Err(_) => reply.error(EIO),
+                    }
+                    return;
+                }
+                reply.error(ENOENT);
+            }
+        }
+    }
+
+    fn unlink(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEmpty) {
+        let name_converted = name_os_to_3ds(name);
+
+        match Ino::from_os(parent) {
+            Ino::File(_) => {
+                reply.error(ENOTDIR);
+            }
+            Ino::Dir(ino) => {
+                let parent_dir = if let Ok(parent_dir) = Dir::open_ino(self.save.clone(), ino) {
+                    parent_dir
+                } else {
+                    reply.error(EIO);
+                    return;
+                };
+
+                if let Ok(child) = parent_dir.open_sub_file(name_converted) {
+                    match child.delete() {
+                        Ok(()) => reply.ok(),
+                        Err(_) => reply.error(EIO),
+                    }
+                    return;
+                }
+                reply.error(ENOENT);
+            }
+        }
+    }
+
     fn open(&mut self, _req: &Request, ino: u64, _flags: u32, reply: ReplyOpen) {
         match Ino::from_os(ino) {
             Ino::File(ino) => {
@@ -210,6 +343,10 @@ impl Filesystem for SaveDataFilesystem {
         let offset = offset as usize;
         let size = size as usize;
         if let Some(file) = self.fh_map.get(&fh) {
+            if size == 0 {
+                reply.data(&[]);
+                return;
+            }
             let end = std::cmp::min(offset + size, file.len());
             if end <= offset {
                 reply.data(&[]);
@@ -219,6 +356,45 @@ impl Filesystem for SaveDataFilesystem {
             match file.read(offset, &mut buf) {
                 Ok(()) | Err(Error::HashMismatch) => reply.data(&buf),
                 _ => reply.error(EIO),
+            }
+        } else {
+            reply.error(EBADF);
+        }
+    }
+
+    fn write(
+        &mut self,
+        _req: &Request,
+        _ino: u64,
+        fh: u64,
+        offset: i64,
+        data: &[u8],
+        _flags: u32,
+        reply: ReplyWrite,
+    ) {
+        let offset = offset as usize;
+        let end = offset + data.len();
+        if let Some(file) = self.fh_map.get_mut(&fh) {
+            if data.is_empty() {
+                reply.written(0);
+                return;
+            }
+            if end > file.len() {
+                match file.resize(end) {
+                    Ok(()) => (),
+                    Err(Error::NoSpace) => {
+                        reply.error(ENOSPC);
+                        return;
+                    }
+                    Err(_) => {
+                        reply.error(EIO);
+                        return;
+                    }
+                }
+                match file.write(offset, &data) {
+                    Ok(()) => reply.written(data.len() as u32),
+                    _ => reply.error(EIO),
+                }
             }
         } else {
             reply.error(EBADF);
@@ -257,7 +433,7 @@ impl Filesystem for SaveDataFilesystem {
                         entries.push((
                             Ino::Dir(i).to_os(),
                             FileType::Directory,
-                            convert_name(&name),
+                            name_3ds_to_str(&name),
                         ));
                     }
 
@@ -271,7 +447,7 @@ impl Filesystem for SaveDataFilesystem {
                         entries.push((
                             Ino::File(i).to_os(),
                             FileType::RegularFile,
-                            convert_name(&name),
+                            name_3ds_to_str(&name),
                         ));
                     }
 
@@ -286,15 +462,100 @@ impl Filesystem for SaveDataFilesystem {
             }
         }
     }
+
+    fn rename(
+        &mut self,
+        _req: &Request,
+        parent: u64,
+        name: &OsStr,
+        newparent: u64,
+        newname: &OsStr,
+        reply: ReplyEmpty,
+    ) {
+        let name_converted = name_os_to_3ds(name);
+        let newname_converted = name_os_to_3ds(newname);
+
+        let dir = match Ino::from_os(parent) {
+            Ino::File(_) => {
+                reply.error(ENOTDIR);
+                return;
+            }
+            Ino::Dir(ino) => match Dir::open_ino(self.save.clone(), ino) {
+                Ok(dir) => dir,
+                Err(_) => {
+                    reply.error(EIO);
+                    return;
+                }
+            },
+        };
+
+        let newdir = match Ino::from_os(newparent) {
+            Ino::File(ino) => {
+                reply.error(ENOTDIR);
+                return;
+            }
+            Ino::Dir(ino) => match Dir::open_ino(self.save.clone(), ino) {
+                Ok(dir) => dir,
+                Err(_) => {
+                    reply.error(EIO);
+                    return;
+                }
+            },
+        };
+
+        if let Ok(file) = newdir.open_sub_file(newname_converted) {
+            match file.delete() {
+                Ok(()) => (),
+                Err(_) => {
+                    reply.error(EIO);
+                    return;
+                }
+            }
+        }
+
+        if let Ok(mut file) = dir.open_sub_file(name_converted) {
+            match file.rename(&newdir, newname_converted) {
+                Ok(()) => reply.ok(),
+                Err(Error::AlreadyExist) => reply.error(EEXIST),
+                Err(_) => reply.error(EIO),
+            }
+        } else {
+            reply.error(ENOENT);
+        }
+    }
 }
 
 fn main() {
-    println!("Hello, world!");
-    let file = std::fs::File::open("/home/wwylele/save3ds/cecd").unwrap();
-    let save = SaveData::from_file(file).unwrap();
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/home/wwylele/save3ds/cecd")
+        .unwrap();
+
+    let mut key_x_sign = [0; 16];
+    let mut key_x_dec = [0; 16];
+    let mut key_y_movable = [0; 16];
+
+    {
+        let mut boot9 = std::fs::File::open("/home/wwylele/3dsbootrom/boot9.bin").unwrap();
+        let mut movable = std::fs::File::open("/home/wwylele/3dsbootrom/movable.sed").unwrap();
+        boot9.seek(SeekFrom::Start(0xD9E0)).unwrap();
+        boot9.read_exact(&mut key_x_sign).unwrap();
+        boot9.read_exact(&mut key_x_dec).unwrap();
+        movable.seek(SeekFrom::Start(0x110)).unwrap();
+        movable.read_exact(&mut key_y_movable).unwrap();
+    }
+
+    let save = SaveData::from_file(
+        file,
+        SaveDataType::Nand(key_x_sign, key_y_movable, 0x0001_0026),
+    )
+    .unwrap();
 
     let fs = SaveDataFilesystem::new(save);
     let options = [];
     let mountpoint = std::path::Path::new("/home/wwylele/save3ds/mount");
+
+    println!("Mounting...");
     mount(fs, &mountpoint, &options).unwrap();
 }

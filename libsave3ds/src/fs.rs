@@ -161,7 +161,7 @@ impl<KeyType: ByteStruct + PartialEq, InfoType: ByteStruct> MetaTable<KeyType, I
 }
 
 pub trait ParentedKey: ByteStruct + PartialEq + Clone {
-    type NameType;
+    type NameType: PartialEq;
     fn get_parent(&self) -> u32;
     fn get_name(&self) -> Self::NameType;
     fn new(parent: u32, name: Self::NameType) -> Self;
@@ -227,6 +227,17 @@ impl<
         Ok(FileMeta { key, pos: ino, fs })
     }
 
+    pub fn rename(
+        &mut self,
+        parent: &DirMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>,
+        name: FileKeyType::NameType,
+    ) -> Result<(), Error> {
+        let (info, _) = self.fs.files.get_at(self.pos)?;
+        self.delete_impl()?;
+        *self = parent.new_sub_file(name, info)?;
+        Ok(())
+    }
+
     pub fn get_parent_ino(&self) -> u32 {
         self.key.get_parent()
     }
@@ -244,6 +255,9 @@ impl<
     }
 
     pub fn delete(self) -> Result<(), Error> {
+        self.delete_impl()
+    }
+    fn delete_impl(&self) -> Result<(), Error> {
         let (self_info, _) = self.fs.files.get_at(self.pos)?;
 
         let parent_index = self.key.get_parent();
@@ -606,7 +620,7 @@ mod test {
             let mut files: Vec<File> = vec![];
 
             for _ in 0..1000 {
-                match rng.gen_range(0, 7) {
+                match rng.gen_range(0, 8) {
                     0 => {
                         // open_sub_dir
                         if dirs.len() == 1 {
@@ -765,6 +779,32 @@ mod test {
                         file.meta.delete().unwrap();
                         let parent = file.parent;
                         assert!(dirs[parent].sub_file_name.remove(&file.name));
+                    }
+                    7 => {
+                        // rename file
+                        if files.is_empty() {
+                            continue;
+                        }
+                        let index = rng.gen_range(0, files.len());
+
+                        let parent = rng.gen_range(0, dirs.len());
+                        let name = loop {
+                            let name: [u8; 16] = rng.gen();
+                            if !dirs[parent].sub_file_name.contains(&name) {
+                                break name;
+                            }
+                        };
+
+                        assert!(dirs[files[index].parent]
+                            .sub_file_name
+                            .remove(&files[index].name));
+
+                        files[index].name = name;
+                        files[index].parent = parent;
+                        assert!(dirs[files[index].parent]
+                            .sub_file_name
+                            .insert(files[index].name));
+                        files[index].meta.rename(&dirs[parent].meta, name).unwrap();
                     }
                     _ => unreachable!(),
                 }

@@ -11,10 +11,15 @@ pub enum Error {
     NotFound,
     AlreadyExist,
     DeletingRoot,
+    SignatureMismatch,
 }
 
 impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Error {
+        {
+            use std::error::Error;
+            println!("Host IO error: {:?}", e);
+        }
         Error::IO(e)
     }
 }

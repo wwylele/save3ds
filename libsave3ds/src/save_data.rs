@@ -3,8 +3,10 @@ use crate::disk_file::DiskFile;
 use crate::error::*;
 use crate::fat::*;
 use crate::fs;
+use crate::key_engine::*;
 use crate::memory_file::MemoryFile;
 use crate::random_access_file::*;
+use crate::signed_file::*;
 use crate::sub_file::SubFile;
 use byte_struct::*;
 use std::rc::Rc;
@@ -12,6 +14,20 @@ use std::rc::Rc;
 type FsMeta = fs::FsMeta<fs::SaveKey, fs::SaveDir, fs::SaveKey, fs::SaveFile>;
 type DirMeta = fs::DirMeta<fs::SaveKey, fs::SaveDir, fs::SaveKey, fs::SaveFile>;
 type FileMeta = fs::FileMeta<fs::SaveKey, fs::SaveDir, fs::SaveKey, fs::SaveFile>;
+
+pub struct NandSaveSigner {
+    pub id: u32,
+}
+
+impl Signer for NandSaveSigner {
+    fn block(&self, mut data: Vec<u8>) -> Vec<u8> {
+        let mut result = Vec::from(&b"CTR-SYS0"[..]);
+        result.extend(&self.id.to_le_bytes());
+        result.extend(&[0; 4]);
+        result.append(&mut data);
+        result
+    }
+}
 
 #[derive(ByteStruct)]
 #[byte_struct_le]
@@ -56,19 +72,38 @@ pub struct SaveData {
     block_len: usize,
 }
 
+pub enum SaveDataType {
+    Nand([u8; 16], [u8; 16], u32),
+    //Sd([u8; 16], [u8; 16], u64),
+    Bare,
+}
+
 impl SaveData {
-    pub fn from_file(file: std::fs::File) -> Result<Rc<SaveData>, Error> {
+    pub fn from_file(
+        file: std::fs::File,
+        save_data_type: SaveDataType,
+    ) -> Result<Rc<SaveData>, Error> {
         let file = Rc::new(DiskFile::new(file)?);
-        SaveData::new(file)
+        SaveData::new(file, save_data_type)
     }
 
-    pub fn from_vec(v: Vec<u8>) -> Result<Rc<SaveData>, Error> {
+    pub fn from_vec(v: Vec<u8>, save_data_type: SaveDataType) -> Result<Rc<SaveData>, Error> {
         let file = Rc::new(MemoryFile::new(v));
-        SaveData::new(file)
+        SaveData::new(file, save_data_type)
     }
 
-    fn new(file: Rc<RandomAccessFile>) -> Result<Rc<SaveData>, Error> {
-        let disa = Rc::new(Disa::new(file)?);
+    fn new(
+        file: Rc<RandomAccessFile>,
+        save_data_type: SaveDataType,
+    ) -> Result<Rc<SaveData>, Error> {
+        let signer: Option<(Box<Signer>, [u8; 16])> = match save_data_type {
+            SaveDataType::Bare => None,
+            SaveDataType::Nand(key_x, key_y, id) => {
+                Some((Box::new(NandSaveSigner { id }), scramble(key_x, key_y)))
+            }
+        };
+
+        let disa = Rc::new(Disa::new(file, signer)?);
         let header: SaveHeader = read_struct(disa[0].as_ref(), 0)?;
         if header.magic != *b"SAVE" || header.version != 0x40000 {
             return make_error(Error::MagicMismatch);
@@ -181,6 +216,13 @@ impl File {
     pub fn open_ino(center: Rc<SaveData>, ino: u32) -> Result<File, Error> {
         let meta = FileMeta::open_ino(center.fs.clone(), ino)?;
         File::from_meta(center, meta)
+    }
+
+    pub fn rename(&mut self, parent: &Dir, name: [u8; 16]) -> Result<(), Error> {
+        if parent.open_sub_file(name).is_ok() || parent.open_sub_dir(name).is_ok() {
+            return make_error(Error::AlreadyExist);
+        }
+        self.meta.rename(&parent.meta, name)
     }
 
     pub fn get_parent_ino(&self) -> u32 {
@@ -299,6 +341,9 @@ impl Dir {
     }
 
     pub fn new_sub_dir(&self, name: [u8; 16]) -> Result<Dir, Error> {
+        if self.open_sub_file(name).is_ok() || self.open_sub_dir(name).is_ok() {
+            return make_error(Error::AlreadyExist);
+        }
         let dir_info = fs::SaveDir {
             next: 0,
             sub_dir: 0,
@@ -312,6 +357,9 @@ impl Dir {
     }
 
     pub fn new_sub_file(&self, name: [u8; 16], len: usize) -> Result<File, Error> {
+        if self.open_sub_file(name).is_ok() || self.open_sub_dir(name).is_ok() {
+            return make_error(Error::AlreadyExist);
+        }
         let (fat_file, block) = if len == 0 {
             (None, 0x8000_0000)
         } else {

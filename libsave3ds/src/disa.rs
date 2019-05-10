@@ -3,6 +3,7 @@ use crate::dual_file::DualFile;
 use crate::error::*;
 use crate::ivfc_level::IvfcLevel;
 use crate::random_access_file::*;
+use crate::signed_file::*;
 use crate::sub_file::SubFile;
 use byte_struct::*;
 use std::ops::Index;
@@ -45,8 +46,21 @@ pub struct Disa {
 }
 
 impl Disa {
-    pub fn new(file: Rc<RandomAccessFile>) -> Result<Disa, Error> {
-        let header_file = Rc::new(SubFile::new(file.clone(), 0x100, 0x100)?); // TODO: link with CMAC
+    pub fn new(
+        file: Rc<RandomAccessFile>,
+        signer: Option<(Box<Signer>, [u8; 16])>,
+    ) -> Result<Disa, Error> {
+        let header_file_bare = Rc::new(SubFile::new(file.clone(), 0x100, 0x100)?);
+        let header_file: Rc<RandomAccessFile> = match signer {
+            None => header_file_bare,
+            Some((signer, key)) => Rc::new(SignedFile::new(
+                Rc::new(SubFile::new(file.clone(), 0, 0x10)?),
+                header_file_bare,
+                signer,
+                key,
+            )?),
+        };
+
         let header: DisaHeader = read_struct(header_file.as_ref(), 0)?;
         if header.magic != *b"DISA" || header.version != 0x40000 {
             return make_error(Error::MagicMismatch);
@@ -145,7 +159,7 @@ mod test {
         let template = include_bytes!("00000000.disa");
         for _ in 0..10 {
             let raw_file = Rc::new(MemoryFile::new(template.to_vec()));
-            let mut disa = Disa::new(raw_file.clone()).unwrap();
+            let mut disa = Disa::new(raw_file.clone(), None).unwrap();
             let mut partition = &disa[0];
             let len = partition.len();
             let init: Vec<u8> = rng.sample_iter(&Standard).take(len).collect();
@@ -156,7 +170,7 @@ mod test {
                 let operation = rng.gen_range(1, 10);
                 if operation == 1 {
                     disa.commit().unwrap();
-                    disa = Disa::new(raw_file.clone()).unwrap();
+                    disa = Disa::new(raw_file.clone(), None).unwrap();
                     partition = &disa[0];
                 } else if operation < 4 {
                     disa.commit().unwrap();
