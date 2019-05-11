@@ -12,6 +12,10 @@ pub enum Error {
     AlreadyExist,
     DeletingRoot,
     SignatureMismatch,
+    NoNand,
+    NoBoot9,
+    NoSd,
+    NoMovable,
 }
 
 impl From<std::io::Error> for Error {

@@ -1,9 +1,7 @@
 use crate::disa::Disa;
-use crate::disk_file::DiskFile;
 use crate::error::*;
 use crate::fat::*;
 use crate::fs;
-use crate::key_engine::*;
 use crate::memory_file::MemoryFile;
 use crate::random_access_file::*;
 use crate::signed_file::*;
@@ -25,6 +23,28 @@ impl Signer for NandSaveSigner {
         result.extend(&self.id.to_le_bytes());
         result.extend(&[0; 4]);
         result.append(&mut data);
+        result
+    }
+}
+
+pub struct CtrSav0Signer {}
+
+impl Signer for CtrSav0Signer {
+    fn block(&self, mut data: Vec<u8>) -> Vec<u8> {
+        let mut result = Vec::from(&b"CTR-SAV0"[..]);
+        result.append(&mut data);
+        result
+    }
+}
+
+pub struct SdSaveSigner {
+    pub id: u64,
+}
+impl Signer for SdSaveSigner {
+    fn block(&self, data: Vec<u8>) -> Vec<u8> {
+        let mut result = Vec::from(&b"CTR-SIGN"[..]);
+        result.extend(&self.id.to_le_bytes());
+        result.append(&mut CtrSav0Signer {}.hash(data));
         result
     }
 }
@@ -73,34 +93,25 @@ pub struct SaveData {
 }
 
 pub enum SaveDataType {
-    Nand([u8; 16], [u8; 16], u32),
-    //Sd([u8; 16], [u8; 16], u64),
+    Nand([u8; 16], u32),
+    Sd([u8; 16], u64),
     Bare,
 }
 
 impl SaveData {
-    pub fn from_file(
-        file: std::fs::File,
-        save_data_type: SaveDataType,
-    ) -> Result<Rc<SaveData>, Error> {
-        let file = Rc::new(DiskFile::new(file)?);
-        SaveData::new(file, save_data_type)
-    }
-
     pub fn from_vec(v: Vec<u8>, save_data_type: SaveDataType) -> Result<Rc<SaveData>, Error> {
         let file = Rc::new(MemoryFile::new(v));
         SaveData::new(file, save_data_type)
     }
 
-    fn new(
+    pub fn new(
         file: Rc<RandomAccessFile>,
         save_data_type: SaveDataType,
     ) -> Result<Rc<SaveData>, Error> {
         let signer: Option<(Box<Signer>, [u8; 16])> = match save_data_type {
             SaveDataType::Bare => None,
-            SaveDataType::Nand(key_x, key_y, id) => {
-                Some((Box::new(NandSaveSigner { id }), scramble(key_x, key_y)))
-            }
+            SaveDataType::Nand(key, id) => Some((Box::new(NandSaveSigner { id }), key)),
+            SaveDataType::Sd(key, id) => Some((Box::new(SdSaveSigner { id }), key)),
         };
 
         let disa = Rc::new(Disa::new(file, signer)?);

@@ -3,11 +3,9 @@ use getopts::*;
 use libc::{EBADF, EEXIST, EIO, EISDIR, ENOENT, ENOSPC, ENOTDIR, ENOTEMPTY};
 use libsave3ds::error::*;
 use libsave3ds::save_data::*;
-use sha2::*;
+use libsave3ds::Resource;
 use std::collections::HashMap;
 use std::ffi::OsStr;
-use std::io::{Read, Seek, SeekFrom};
-use std::path::*;
 use std::rc::Rc;
 use time;
 
@@ -553,17 +551,6 @@ fn print_usage(program: &str, opts: Options) {
     print!("{}", opts.usage(&brief));
 }
 
-fn hash_movable(key: [u8; 16]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.input(&key);
-    let hash = hasher.result();
-    let mut result = String::new();
-    for index in &[3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12] {
-        result.extend(format!("{:02x}", hash[*index]).chars());
-    }
-    result
-}
-
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let program = args[0].clone();
@@ -600,9 +587,9 @@ fn main() {
     let boot9_path = matches.opt_str("boot9");
     let movable_path = matches.opt_str("movable");
     let bare_path = matches.opt_str("bare");
-    let sd_path = matches.opt_str("sd").map(|s| Path::new(&s).to_owned());
+    let sd_path = matches.opt_str("sd");
     let sd_id = matches.opt_str("sdsave");
-    let nand_path = matches.opt_str("nand").map(|s| Path::new(&s).to_owned());
+    let nand_path = matches.opt_str("nand");
     let nand_id = matches.opt_str("nandsave");
 
     if [&sd_id, &nand_id, &bare_path]
@@ -615,67 +602,21 @@ fn main() {
         return;
     }
 
-    let key_x = if let Some(boot9) = boot9_path {
-        let mut boot9 = std::fs::File::open(boot9).expect("boot9 error");
-        let mut key_x_sign = [0; 16];
-        let mut key_x_dec = [0; 16];
-        boot9.seek(SeekFrom::Start(0xD9E0)).expect("boot9 error");
-        boot9.read_exact(&mut key_x_sign).expect("boot9 error");
-        boot9.read_exact(&mut key_x_dec).expect("boot9 error");
-        Some((key_x_sign, key_x_dec))
-    } else {
-        None
-    };
-
-    let movable = if let Some(nand_path) = &nand_path {
-        if movable_path.is_some() {
-            println!("WARNING: provided movable.sed file is ignored as the one in the NAND is used instead");
-        }
-        Some(nand_path.join("private").join("movable.sed"))
-    } else {
-        movable_path.map(|s| Path::new(&s).to_owned())
-    };
-
-    let key_y = if let Some(movable) = movable {
-        let mut key_y = [0; 16];
-        let mut movable = std::fs::File::open(&movable).expect("movable error");
-        movable.seek(SeekFrom::Start(0x110)).expect("movable error");
-        movable.read_exact(&mut key_y).expect("movable error");
-        Some(key_y)
-    } else {
-        None
-    };
+    let resource = Resource::new(boot9_path, movable_path, sd_path, nand_path)
+        .expect("Failed to load resource");
 
     let save = if let Some(bare) = bare_path {
         println!(
-            "WARNING: After modification, you need to resign the CMAC header using other tools."
+            "WARNING: After modification, you need to sign the CMAC header using other tools."
         );
 
-        let file = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(bare)
-            .expect("Unable to open the save file");
-
-        SaveData::from_file(file, SaveDataType::Bare).expect("DISA error")
+        resource.open_bare_save(&bare).expect("Failed to open save")
     } else if let Some(id) = nand_id {
-        let (key_x_sign, _) = key_x.expect("No boot9 provided");
         let id = u32::from_str_radix(&id, 16).expect("Invalid ID");
-        let path = nand_path
-            .expect("No NAND path specified")
-            .join("data")
-            .join(hash_movable(key_y.unwrap()))
-            .join("sysdata")
-            .join(format!("{:08x}", id))
-            .join("00000000");
-        let file = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(path)
-            .expect("Unable to open the save file");
-
-        SaveData::from_file(file, SaveDataType::Nand(key_x_sign, key_y.unwrap(), id))
-            .expect("DISA error")
+        resource.open_nand_save(id).expect("Failed to open save")
+    } else if let Some(id) = sd_id {
+        let id = u64::from_str_radix(&id, 16).expect("Invalid ID");
+        resource.open_sd_save(id).expect("Failed to open save")
     } else {
         panic!()
     };
