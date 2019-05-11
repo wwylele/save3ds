@@ -1,10 +1,13 @@
 use fuse::*;
+use getopts::*;
 use libc::{EBADF, EEXIST, EIO, EISDIR, ENOENT, ENOSPC, ENOTDIR, ENOTEMPTY};
 use libsave3ds::error::*;
 use libsave3ds::save_data::*;
+use sha2::*;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::io::{Read, Seek, SeekFrom};
+use std::path::*;
 use std::rc::Rc;
 use time;
 
@@ -545,37 +548,142 @@ impl Filesystem for SaveDataFilesystem {
     }
 }
 
+fn print_usage(program: &str, opts: Options) {
+    let brief = format!("Usage: {} [OPTIONS] MOUNT_PATH", program);
+    print!("{}", opts.usage(&brief));
+}
+
+fn hash_movable(key: [u8; 16]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.input(&key);
+    let hash = hasher.result();
+    let mut result = String::new();
+    for index in &[3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12] {
+        result.extend(format!("{:02x}", hash[*index]).chars());
+    }
+    result
+}
+
 fn main() {
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open("/home/wwylele/save3ds/cecd")
-        .unwrap();
+    let args: Vec<String> = std::env::args().collect();
+    let program = args[0].clone();
 
-    let mut key_x_sign = [0; 16];
-    let mut key_x_dec = [0; 16];
-    let mut key_y_movable = [0; 16];
+    let mut opts = Options::new();
+    opts.optopt("b", "boot9", "boot9.bin file path", "DIR");
+    opts.optflag("h", "help", "print this help menu");
+    opts.optopt("m", "movable", "movable.sed file path", "FILE");
+    opts.optopt("", "bare", "mount a bare DISA file", "FILE");
+    opts.optopt("", "sd", "SD root path", "DIR");
+    opts.optopt("", "sdsave", "mount the SD save with the ID", "ID");
+    opts.optopt("", "nand", "NAND root path", "DIR");
+    opts.optopt("", "nandsave", "mount the NAND save with the ID", "ID");
 
-    {
-        let mut boot9 = std::fs::File::open("/home/wwylele/3dsbootrom/boot9.bin").unwrap();
-        let mut movable = std::fs::File::open("/home/wwylele/3dsbootrom/movable.sed").unwrap();
-        boot9.seek(SeekFrom::Start(0xD9E0)).unwrap();
-        boot9.read_exact(&mut key_x_sign).unwrap();
-        boot9.read_exact(&mut key_x_dec).unwrap();
-        movable.seek(SeekFrom::Start(0x110)).unwrap();
-        movable.read_exact(&mut key_y_movable).unwrap();
+    let matches = match opts.parse(&args[1..]) {
+        Ok(m) => m,
+        Err(f) => {
+            println!("Failed to parse the arguments: {}", f);
+            print_usage(&program, opts);
+            return;
+        }
+    };
+
+    if matches.opt_present("h") {
+        print_usage(&program, opts);
+        return;
     }
 
-    let save = SaveData::from_file(
-        file,
-        SaveDataType::Nand(key_x_sign, key_y_movable, 0x0001_0026),
-    )
-    .unwrap();
+    if matches.free.len() != 1 {
+        println!("Please specify one mount path");
+        return;
+    }
+
+    let boot9_path = matches.opt_str("boot9");
+    let movable_path = matches.opt_str("movable");
+    let bare_path = matches.opt_str("bare");
+    let sd_path = matches.opt_str("sd").map(|s| Path::new(&s).to_owned());
+    let sd_id = matches.opt_str("sdsave");
+    let nand_path = matches.opt_str("nand").map(|s| Path::new(&s).to_owned());
+    let nand_id = matches.opt_str("nandsave");
+
+    if [&sd_id, &nand_id, &bare_path]
+        .iter()
+        .map(|x| if x.is_none() { 0 } else { 1 })
+        .sum::<i32>()
+        != 1
+    {
+        println!("One and only one of the following arguments must be supplied: --sdsave, --nandsave, --bare");
+        return;
+    }
+
+    let key_x = if let Some(boot9) = boot9_path {
+        let mut boot9 = std::fs::File::open(boot9).expect("boot9 error");
+        let mut key_x_sign = [0; 16];
+        let mut key_x_dec = [0; 16];
+        boot9.seek(SeekFrom::Start(0xD9E0)).expect("boot9 error");
+        boot9.read_exact(&mut key_x_sign).expect("boot9 error");
+        boot9.read_exact(&mut key_x_dec).expect("boot9 error");
+        Some((key_x_sign, key_x_dec))
+    } else {
+        None
+    };
+
+    let movable = if let Some(nand_path) = &nand_path {
+        if movable_path.is_some() {
+            println!("WARNING: provided movable.sed file is ignored as the one in the NAND is used instead");
+        }
+        Some(nand_path.join("private").join("movable.sed"))
+    } else {
+        movable_path.map(|s| Path::new(&s).to_owned())
+    };
+
+    let key_y = if let Some(movable) = movable {
+        let mut key_y = [0; 16];
+        let mut movable = std::fs::File::open(&movable).expect("movable error");
+        movable.seek(SeekFrom::Start(0x110)).expect("movable error");
+        movable.read_exact(&mut key_y).expect("movable error");
+        Some(key_y)
+    } else {
+        None
+    };
+
+    let save = if let Some(bare) = bare_path {
+        println!(
+            "WARNING: After modification, you need to resign the CMAC header using other tools."
+        );
+
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(bare)
+            .expect("Unable to open the save file");
+
+        SaveData::from_file(file, SaveDataType::Bare).expect("DISA error")
+    } else if let Some(id) = nand_id {
+        let (key_x_sign, _) = key_x.expect("No boot9 provided");
+        let id = u32::from_str_radix(&id, 16).expect("Invalid ID");
+        let path = nand_path
+            .expect("No NAND path specified")
+            .join("data")
+            .join(hash_movable(key_y.unwrap()))
+            .join("sysdata")
+            .join(format!("{:08x}", id))
+            .join("00000000");
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .expect("Unable to open the save file");
+
+        SaveData::from_file(file, SaveDataType::Nand(key_x_sign, key_y.unwrap(), id))
+            .expect("DISA error")
+    } else {
+        panic!()
+    };
 
     let fs = SaveDataFilesystem::new(save);
     let options = [];
-    let mountpoint = std::path::Path::new("/home/wwylele/save3ds/mount");
+    let mountpoint = std::path::Path::new(&matches.free[0]);
 
-    println!("Mounting...");
+    println!("Start mounting");
     mount(fs, &mountpoint, &options).unwrap();
 }

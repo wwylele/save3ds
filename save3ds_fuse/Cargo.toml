@@ -9,3 +9,5 @@ libsave3ds = { path = "../libsave3ds" }
 libc = "0.2.54"
 fuse = "0.3.1"
 time = "0.1.42"
+getopts = "0.2"
+sha2 = "0.8.0"
