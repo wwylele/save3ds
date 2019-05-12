@@ -1,6 +1,6 @@
 use fuse::*;
 use getopts::*;
-use libc::{EBADF, EEXIST, EIO, EISDIR, ENOENT, ENOSPC, ENOTDIR, ENOTEMPTY};
+use libc::{EBADF, EEXIST, EIO, EISDIR, ENOENT, ENOSPC, ENOTDIR, ENOTEMPTY, EROFS};
 use libsave3ds::error::*;
 use libsave3ds::save_data::*;
 use libsave3ds::Resource;
@@ -13,14 +13,54 @@ struct SaveDataFilesystem {
     save: Rc<SaveData>,
     fh_map: HashMap<u64, File>,
     next_fh: u64,
+    read_only: bool,
 }
 
 impl SaveDataFilesystem {
-    fn new(save: Rc<SaveData>) -> SaveDataFilesystem {
+    fn new(save: Rc<SaveData>, read_only: bool) -> SaveDataFilesystem {
         SaveDataFilesystem {
             save,
             fh_map: HashMap::new(),
             next_fh: 1,
+            read_only,
+        }
+    }
+
+    fn make_dir_attr(&self, ino: u64, sub_file_count: usize) -> FileAttr {
+        FileAttr {
+            ino,
+            size: 0,
+            blocks: 0,
+            atime: time::Timespec::new(0, 0),
+            mtime: time::Timespec::new(0, 0),
+            ctime: time::Timespec::new(0, 0),
+            crtime: time::Timespec::new(0, 0),
+            kind: FileType::Directory,
+            perm: if self.read_only { 0o555 } else { 0o777 },
+            nlink: 2 + sub_file_count as u32,
+            uid: 501,
+            gid: 20,
+            rdev: 0,
+            flags: 0,
+        }
+    }
+
+    fn make_file_attr(&self, ino: u64, file_size: usize) -> FileAttr {
+        FileAttr {
+            ino,
+            size: file_size as u64,
+            blocks: 1,
+            atime: time::Timespec::new(0, 0),
+            mtime: time::Timespec::new(0, 0),
+            ctime: time::Timespec::new(0, 0),
+            crtime: time::Timespec::new(0, 0),
+            kind: FileType::RegularFile,
+            perm: if self.read_only { 0o444 } else { 0o666 },
+            nlink: 1,
+            uid: 501,
+            gid: 20,
+            rdev: 0,
+            flags: 0,
         }
     }
 }
@@ -37,44 +77,6 @@ fn name_os_to_3ds(name: &OsStr) -> [u8; 16] {
     let len = std::cmp::min(16, utf8.len());
     name_converted[0..len].copy_from_slice(&utf8[0..len]);
     name_converted
-}
-
-fn make_dir_attr(ino: u64, sub_file_count: usize) -> FileAttr {
-    FileAttr {
-        ino,
-        size: 0,
-        blocks: 0,
-        atime: time::Timespec::new(0, 0),
-        mtime: time::Timespec::new(0, 0),
-        ctime: time::Timespec::new(0, 0),
-        crtime: time::Timespec::new(0, 0),
-        kind: FileType::Directory,
-        perm: 0o777,
-        nlink: 2 + sub_file_count as u32,
-        uid: 501,
-        gid: 20,
-        rdev: 0,
-        flags: 0,
-    }
-}
-
-fn make_file_attr(ino: u64, file_size: usize) -> FileAttr {
-    FileAttr {
-        ino,
-        size: file_size as u64,
-        blocks: 1,
-        atime: time::Timespec::new(0, 0),
-        mtime: time::Timespec::new(0, 0),
-        ctime: time::Timespec::new(0, 0),
-        crtime: time::Timespec::new(0, 0),
-        kind: FileType::RegularFile,
-        perm: 0o666,
-        nlink: 1,
-        uid: 501,
-        gid: 20,
-        rdev: 0,
-        flags: 0,
-    }
 }
 
 enum Ino {
@@ -101,8 +103,10 @@ impl Ino {
 
 impl Drop for SaveDataFilesystem {
     fn drop(&mut self) {
-        self.save.commit().unwrap();
-        println!("Saved");
+        if !self.read_only {
+            self.save.commit().unwrap();
+            println!("Saved");
+        }
     }
 }
 
@@ -132,7 +136,7 @@ impl Filesystem for SaveDataFilesystem {
 
                     reply.entry(
                         &time::Timespec::new(1, 0),
-                        &make_dir_attr(Ino::Dir(child.get_ino()).to_os(), children_len),
+                        &self.make_dir_attr(Ino::Dir(child.get_ino()).to_os(), children_len),
                         0,
                     );
                     return;
@@ -140,7 +144,7 @@ impl Filesystem for SaveDataFilesystem {
                 if let Ok(child) = parent_dir.open_sub_file(name_converted) {
                     reply.entry(
                         &time::Timespec::new(1, 0),
-                        &make_file_attr(Ino::File(child.get_ino()).to_os(), child.len()),
+                        &self.make_file_attr(Ino::File(child.get_ino()).to_os(), child.len()),
                         0,
                     );
                     return;
@@ -156,7 +160,7 @@ impl Filesystem for SaveDataFilesystem {
                 if let Ok(file) = File::open_ino(self.save.clone(), ino) {
                     reply.attr(
                         &time::Timespec::new(1, 0),
-                        &make_file_attr(Ino::File(file.get_ino()).to_os(), file.len()),
+                        &self.make_file_attr(Ino::File(file.get_ino()).to_os(), file.len()),
                     );
                 } else {
                     reply.error(ENOENT);
@@ -172,7 +176,7 @@ impl Filesystem for SaveDataFilesystem {
                     };
                     reply.attr(
                         &time::Timespec::new(1, 0),
-                        &make_dir_attr(Ino::Dir(dir.get_ino()).to_os(), children_len),
+                        &self.make_dir_attr(Ino::Dir(dir.get_ino()).to_os(), children_len),
                     );
                 } else {
                     reply.error(ENOENT);
@@ -182,6 +186,10 @@ impl Filesystem for SaveDataFilesystem {
     }
 
     fn mkdir(&mut self, _req: &Request, parent: u64, name: &OsStr, _mode: u32, reply: ReplyEntry) {
+        if self.read_only {
+            reply.error(EROFS);
+            return;
+        }
         let name_converted = name_os_to_3ds(name);
         match Ino::from_os(parent) {
             Ino::File(_) => {
@@ -197,7 +205,7 @@ impl Filesystem for SaveDataFilesystem {
                 match parent_dir.new_sub_dir(name_converted) {
                     Ok(child) => reply.entry(
                         &time::Timespec::new(1, 0),
-                        &make_dir_attr(Ino::Dir(child.get_ino()).to_os(), 0),
+                        &self.make_dir_attr(Ino::Dir(child.get_ino()).to_os(), 0),
                         0,
                     ),
                     Err(Error::AlreadyExist) => reply.error(EEXIST),
@@ -218,6 +226,10 @@ impl Filesystem for SaveDataFilesystem {
         _rdev: u32,
         reply: ReplyEntry,
     ) {
+        if self.read_only {
+            reply.error(EROFS);
+            return;
+        }
         let name_converted = name_os_to_3ds(name);
         match Ino::from_os(parent) {
             Ino::File(_) => {
@@ -234,7 +246,7 @@ impl Filesystem for SaveDataFilesystem {
                 match parent_dir.new_sub_file(name_converted, 0) {
                     Ok(child) => reply.entry(
                         &time::Timespec::new(1, 0),
-                        &make_file_attr(Ino::File(child.get_ino()).to_os(), 0),
+                        &self.make_file_attr(Ino::File(child.get_ino()).to_os(), 0),
                         0,
                     ),
                     Err(Error::AlreadyExist) => reply.error(EEXIST),
@@ -247,6 +259,10 @@ impl Filesystem for SaveDataFilesystem {
     }
 
     fn rmdir(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEmpty) {
+        if self.read_only {
+            reply.error(EROFS);
+            return;
+        }
         let name_converted = name_os_to_3ds(name);
 
         match Ino::from_os(parent) {
@@ -275,6 +291,10 @@ impl Filesystem for SaveDataFilesystem {
     }
 
     fn unlink(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEmpty) {
+        if self.read_only {
+            reply.error(EROFS);
+            return;
+        }
         let name_converted = name_os_to_3ds(name);
 
         match Ino::from_os(parent) {
@@ -373,6 +393,11 @@ impl Filesystem for SaveDataFilesystem {
         _flags: u32,
         reply: ReplyWrite,
     ) {
+        if self.read_only {
+            reply.error(EROFS);
+            return;
+        }
+
         let offset = offset as usize;
         let end = offset + data.len();
         if let Some(file) = self.fh_map.get_mut(&fh) {
@@ -473,6 +498,11 @@ impl Filesystem for SaveDataFilesystem {
         newname: &OsStr,
         reply: ReplyEmpty,
     ) {
+        if self.read_only {
+            reply.error(EROFS);
+            return;
+        }
+
         let name_converted = name_os_to_3ds(name);
         let newname_converted = name_os_to_3ds(newname);
 
@@ -559,6 +589,7 @@ fn main() {
     opts.optopt("b", "boot9", "boot9.bin file path", "DIR");
     opts.optflag("h", "help", "print this help menu");
     opts.optopt("m", "movable", "movable.sed file path", "FILE");
+    opts.optflag("r", "readonly", "mount as read-only file system");
     opts.optopt("", "bare", "mount a bare DISA file", "FILE");
     opts.optopt("", "sd", "SD root path", "DIR");
     opts.optopt("", "sdsave", "mount the SD save with the ID", "ID");
@@ -621,7 +652,7 @@ fn main() {
         panic!()
     };
 
-    let fs = SaveDataFilesystem::new(save);
+    let fs = SaveDataFilesystem::new(save, matches.opt_present("r"));
     let options = [];
     let mountpoint = std::path::Path::new(&matches.free[0]);
 
