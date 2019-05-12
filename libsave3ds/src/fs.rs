@@ -429,19 +429,19 @@ impl<
         })
     }
 
-    pub fn delete(self) -> Result<Option<Self>, Error> {
+    pub fn delete(self) -> Result<(), Error> {
         let (self_info, _) = self.fs.dirs.get_at(self.pos)?;
         if self.pos == 1 {
             return make_error(Error::DeletingRoot);
         }
         if self_info.get_sub_dir() != 0 {
-            return Ok(Some(self));
+            return make_error(Error::NotEmpty);
         }
         if self_info.get_sub_file() != 0 {
-            return Ok(Some(self));
+            return make_error(Error::NotEmpty);
         }
         self.delete_impl()?;
-        Ok(None)
+        Ok(())
     }
 
     fn delete_impl(&self) -> Result<(), Error> {
@@ -708,8 +708,9 @@ mod test {
                         }
                         let index = rng.gen_range(1, dirs.len());
                         let mut dir = dirs.remove(index);
+                        let ino = dir.meta.get_ino();
                         match dir.meta.delete() {
-                            Ok(None) => {
+                            Ok(()) => {
                                 assert!(
                                     dir.sub_dir_name.is_empty() && dir.sub_file_name.is_empty()
                                 );
@@ -730,11 +731,11 @@ mod test {
                                     }
                                 }
                             }
-                            Ok(Some(meta)) => {
+                            Err(Error::NotEmpty) => {
                                 assert!(
                                     !dir.sub_dir_name.is_empty() || !dir.sub_file_name.is_empty()
                                 );
-                                dir.meta = meta;
+                                dir.meta = DirMeta::open_ino(fs.clone(), ino).unwrap();
                                 dirs.insert(index, dir);
                             }
                             _ => unreachable!(),

@@ -16,6 +16,7 @@ pub enum Error {
     NoBoot9,
     NoSd,
     NoMovable,
+    NotEmpty,
 }
 
 impl From<std::io::Error> for Error {

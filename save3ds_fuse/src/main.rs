@@ -279,8 +279,8 @@ impl Filesystem for SaveDataFilesystem {
 
                 if let Ok(child) = parent_dir.open_sub_dir(name_converted) {
                     match child.delete() {
-                        Ok(None) => reply.ok(),
-                        Ok(Some(_)) => reply.error(ENOTEMPTY),
+                        Ok(()) => reply.ok(),
+                        Err(Error::NotEmpty) => reply.error(ENOTEMPTY),
                         Err(_) => reply.error(EIO),
                     }
                     return;
@@ -553,8 +553,8 @@ impl Filesystem for SaveDataFilesystem {
         } else if let Ok(mut dir) = dir.open_sub_dir(name_converted) {
             if let Ok(old_dir) = newdir.open_sub_dir(newname_converted) {
                 match old_dir.delete() {
-                    Ok(None) => (),
-                    Ok(Some(_)) => {
+                    Ok(()) => (),
+                    Err(Error::NotEmpty) => {
                         reply.error(ENOTEMPTY);
                         return;
                     }

@@ -2,5 +2,6 @@
 
 members = [
     "libsave3ds",
-    "save3ds_fuse"
+    "libsave3ds_c",
+    "save3ds_fuse",
 ]

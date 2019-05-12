@@ -407,15 +407,8 @@ impl Dir {
         }
     }
 
-    pub fn delete(self) -> Result<Option<Dir>, Error> {
-        if let Some(meta) = self.meta.delete()? {
-            Ok(Some(Dir {
-                center: self.center,
-                meta,
-            }))
-        } else {
-            Ok(None)
-        }
+    pub fn delete(self) -> Result<(), Error> {
+        self.meta.delete()
     }
 }
 
