@@ -12,6 +12,7 @@ mod key_engine;
 mod memory_file;
 mod random_access_file;
 pub mod save_data;
+mod sd;
 mod signed_file;
 mod sub_file;
 
@@ -20,6 +21,7 @@ use disk_file::DiskFile;
 use error::*;
 use key_engine::*;
 use save_data::*;
+use sd::Sd;
 use sha2::*;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::*;
@@ -37,10 +39,9 @@ fn hash_movable(key: [u8; 16]) -> String {
 }
 
 pub struct Resource {
-    sd_path: Option<PathBuf>,
+    sd: Option<Sd>,
     nand_path: Option<PathBuf>,
     key_x_sign: Option<[u8; 16]>,
-    key_x_dec: Option<[u8; 16]>,
     key_y: Option<[u8; 16]>,
 }
 
@@ -51,7 +52,6 @@ impl Resource {
         sd_path: Option<String>,
         nand_path: Option<String>,
     ) -> Result<Resource, Error> {
-        let sd_path = sd_path.map(|s| Path::new(&s).to_owned());
         let nand_path = nand_path.map(|s| Path::new(&s).to_owned());
 
         let (key_x_sign, key_x_dec) = if let Some(boot9) = boot9_path {
@@ -82,58 +82,26 @@ impl Resource {
             None
         };
 
+        let sd = if let (Some(sd), Some(x), Some(y)) = (sd_path, key_x_dec, key_y) {
+            Some(Sd::new(&sd, x, y)?)
+        } else {
+            None
+        };
+
         Ok(Resource {
-            sd_path,
+            sd,
             nand_path,
             key_x_sign,
-            key_x_dec,
             key_y,
         })
     }
 
     pub fn open_sd_save(&self, id: u64) -> Result<Rc<SaveData>, Error> {
-        let path = self
-            .sd_path
-            .as_ref()
-            .ok_or(Error::NoSd)?
-            .join("Nintendo 3DS")
-            .join(hash_movable(self.key_y.ok_or(Error::NoNand)?));
-        let path = std::fs::read_dir(path)?.next().ok_or(Error::NoSd)??.path();
         let id_high = format!("{:08x}", id >> 32);
         let id_low = format!("{:08x}", id & 0xFFFF_FFFF);
         let sub_path = ["title", &id_high, &id_low, "data", "00000001.sav"];
 
-        let file_path = sub_path.iter().fold(path, |a, b| a.join(b));
-        let file = Rc::new(DiskFile::new(
-            std::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(file_path)?,
-        )?);
-
-        let hash_path: Vec<u8> = sub_path
-            .iter()
-            .map(|s| std::iter::once(b'/').chain(s.bytes()))
-            .flatten()
-            .chain(std::iter::once(0))
-            .map(|c| std::iter::once(c).chain(std::iter::once(0)))
-            .flatten()
-            .collect();
-
-        let mut hasher = Sha256::new();
-        hasher.input(&hash_path);
-        let hash = hasher.result();
-        let mut ctr = [0; 16];
-        for (i, c) in ctr.iter_mut().enumerate() {
-            *c = hash[i] ^ hash[i + 16];
-        }
-
-        let dec_key = scramble(
-            self.key_x_dec.ok_or(Error::NoBoot9)?,
-            self.key_y.ok_or(Error::NoMovable)?,
-        );
-
-        let dec_file = Rc::new(AesCtrFile::new(file, dec_key, ctr));
+        let dec_file = Rc::new(self.sd.as_ref().ok_or(Error::NoSd)?.open(&sub_path)?);
 
         SaveData::new(
             dec_file,
