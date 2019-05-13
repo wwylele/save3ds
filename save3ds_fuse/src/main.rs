@@ -1,6 +1,6 @@
 use fuse::*;
 use getopts::*;
-use libc::{EBADF, EEXIST, EIO, EISDIR, ENOENT, ENOSPC, ENOTDIR, ENOTEMPTY, EROFS};
+use libc::{EBADF, EEXIST, EIO, EISDIR, ENAMETOOLONG, ENOENT, ENOSPC, ENOTDIR, ENOTEMPTY, EROFS};
 use libsave3ds::error::*;
 use libsave3ds::save_data::*;
 use libsave3ds::Resource;
@@ -65,18 +65,65 @@ impl SaveDataFilesystem {
     }
 }
 
-fn name_3ds_to_str(name: &[u8; 16]) -> String {
-    let trimmed: Vec<u8> = name.iter().cloned().take_while(|c| *c != 0).collect();
-    std::str::from_utf8(&trimmed).unwrap().to_owned()
+fn is_legal_char(c: u8) -> bool {
+    c >= 32 && c < 127 && c != 47 && c != 92
 }
 
-fn name_os_to_3ds(name: &OsStr) -> [u8; 16] {
-    // TODO better name conversion
+fn name_3ds_to_str(name: &[u8; 16]) -> String {
+    let mut last_char = 15;
+    loop {
+        if name[last_char] != 0 || last_char == 0 {
+            break;
+        }
+        last_char -= 1;
+    }
+
+    name[0..=last_char]
+        .iter()
+        .map(|x| {
+            if is_legal_char(*x) {
+                String::from_utf8(vec![*x]).unwrap()
+            } else {
+                format!("\\x{:02x}", *x)
+            }
+        })
+        .fold("".to_owned(), |mut x, y| {
+            x.push_str(&y);
+            x
+        })
+}
+
+fn name_os_to_3ds(name: &OsStr) -> Option<[u8; 16]> {
     let mut name_converted = [0; 16];
-    let utf8 = name.to_str().unwrap().as_bytes();
-    let len = std::cmp::min(16, utf8.len());
-    name_converted[0..len].copy_from_slice(&utf8[0..len]);
-    name_converted
+    let bytes = name.to_str()?.as_bytes();
+    let mut out_i = 0;
+    let mut in_i = 0;
+    loop {
+        if in_i == bytes.len() {
+            break;
+        }
+        if out_i == name_converted.len() {
+            return None;
+        }
+
+        if bytes[in_i] != b'\\' {
+            name_converted[out_i] = bytes[in_i];
+            out_i += 1;
+            in_i += 1;
+        } else {
+            in_i += 1;
+            if *bytes.get(in_i)? != b'x' {
+                return None;
+            }
+            in_i += 1;
+            name_converted[out_i] =
+                u8::from_str_radix(std::str::from_utf8(bytes.get(in_i..in_i + 2)?).ok()?, 16)
+                    .ok()?;
+            out_i += 1;
+            in_i += 2;
+        }
+    }
+    Some(name_converted)
 }
 
 enum Ino {
@@ -112,7 +159,12 @@ impl Drop for SaveDataFilesystem {
 
 impl Filesystem for SaveDataFilesystem {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        let name_converted = name_os_to_3ds(name);
+        let name_converted = if let Some(n) = name_os_to_3ds(name) {
+            n
+        } else {
+            reply.error(ENAMETOOLONG);
+            return;
+        };
 
         match Ino::from_os(parent) {
             Ino::File(_) => {
@@ -190,7 +242,12 @@ impl Filesystem for SaveDataFilesystem {
             reply.error(EROFS);
             return;
         }
-        let name_converted = name_os_to_3ds(name);
+        let name_converted = if let Some(n) = name_os_to_3ds(name) {
+            n
+        } else {
+            reply.error(ENAMETOOLONG);
+            return;
+        };
         match Ino::from_os(parent) {
             Ino::File(_) => {
                 reply.error(ENOTDIR);
@@ -230,7 +287,12 @@ impl Filesystem for SaveDataFilesystem {
             reply.error(EROFS);
             return;
         }
-        let name_converted = name_os_to_3ds(name);
+        let name_converted = if let Some(n) = name_os_to_3ds(name) {
+            n
+        } else {
+            reply.error(ENAMETOOLONG);
+            return;
+        };
         match Ino::from_os(parent) {
             Ino::File(_) => {
                 reply.error(ENOTDIR);
@@ -263,7 +325,12 @@ impl Filesystem for SaveDataFilesystem {
             reply.error(EROFS);
             return;
         }
-        let name_converted = name_os_to_3ds(name);
+        let name_converted = if let Some(n) = name_os_to_3ds(name) {
+            n
+        } else {
+            reply.error(ENAMETOOLONG);
+            return;
+        };
 
         match Ino::from_os(parent) {
             Ino::File(_) => {
@@ -295,7 +362,12 @@ impl Filesystem for SaveDataFilesystem {
             reply.error(EROFS);
             return;
         }
-        let name_converted = name_os_to_3ds(name);
+        let name_converted = if let Some(n) = name_os_to_3ds(name) {
+            n
+        } else {
+            reply.error(ENAMETOOLONG);
+            return;
+        };
 
         match Ino::from_os(parent) {
             Ino::File(_) => {
@@ -503,8 +575,18 @@ impl Filesystem for SaveDataFilesystem {
             return;
         }
 
-        let name_converted = name_os_to_3ds(name);
-        let newname_converted = name_os_to_3ds(newname);
+        let name_converted = if let Some(n) = name_os_to_3ds(name) {
+            n
+        } else {
+            reply.error(ENAMETOOLONG);
+            return;
+        };
+        let newname_converted = if let Some(n) = name_os_to_3ds(newname) {
+            n
+        } else {
+            reply.error(ENAMETOOLONG);
+            return;
+        };
 
         let dir = match Ino::from_os(parent) {
             Ino::File(_) => {
@@ -658,4 +740,51 @@ fn main() {
 
     println!("Start mounting");
     mount(fs, &mountpoint, &options).unwrap();
+}
+
+#[cfg(test)]
+mod test {
+    use crate::*;
+
+    #[test]
+    fn test_string_conversion() {
+        assert_eq!(
+            name_3ds_to_str(&[b'a', b'b', b'c', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+            "abc"
+        );
+
+        assert_eq!(
+            name_3ds_to_str(&[b'a', b'b', b'c', 0, 0, 0, b'd', 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+            "abc\\x00\\x00\\x00d"
+        );
+
+        assert_eq!(
+            name_3ds_to_str(&[b'a', b'/', b'\n', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+            "a\\x2f\\x0a"
+        );
+
+        assert_eq!(
+            name_3ds_to_str(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+            "\\x00"
+        );
+
+        assert_eq!(
+            name_os_to_3ds(OsStr::new("abc")),
+            Some([b'a', b'b', b'c', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+        );
+        assert_eq!(
+            name_os_to_3ds(OsStr::new("a\\x12c")),
+            Some([b'a', 0x12, b'c', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+        );
+        assert_eq!(
+            name_os_to_3ds(OsStr::new("a\\x12\x34c")),
+            Some([b'a', 0x12, 0x34, b'c', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+        );
+        assert_eq!(name_os_to_3ds(OsStr::new("a\\2c")), None);
+        assert_eq!(name_os_to_3ds(OsStr::new("a\\x1")), None);
+        assert_eq!(name_os_to_3ds(OsStr::new("a\\x")), None);
+        assert_eq!(name_os_to_3ds(OsStr::new("a\\")), None);
+        assert!(name_os_to_3ds(OsStr::new("aaaaaaaaaaaaaaaa")).is_some());
+        assert!(name_os_to_3ds(OsStr::new("aaaaaaaaaaaaaaaaa")).is_none());
+    }
 }
