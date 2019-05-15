@@ -1,5 +1,5 @@
 use fuse::*;
-use getopts::*;
+use getopts::Options;
 use libc::{EBADF, EEXIST, EIO, EISDIR, ENAMETOOLONG, ENOENT, ENOSPC, ENOTDIR, ENOTEMPTY, EROFS};
 use libsave3ds::error::*;
 use libsave3ds::save_data::*;
@@ -663,7 +663,7 @@ fn print_usage(program: &str, opts: Options) {
     print!("{}", opts.usage(&brief));
 }
 
-fn main() {
+fn main() -> Result<(), Box<std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     let program = args[0].clone();
 
@@ -683,18 +683,18 @@ fn main() {
         Err(f) => {
             println!("Failed to parse the arguments: {}", f);
             print_usage(&program, opts);
-            return;
+            return Ok(());
         }
     };
 
     if matches.opt_present("h") {
         print_usage(&program, opts);
-        return;
+        return Ok(());
     }
 
     if matches.free.len() != 1 {
         println!("Please specify one mount path");
-        return;
+        return Ok(());
     }
 
     let boot9_path = matches.opt_str("boot9");
@@ -712,24 +712,23 @@ fn main() {
         != 1
     {
         println!("One and only one of the following arguments must be supplied: --sdsave, --nandsave, --bare");
-        return;
+        return Ok(());
     }
 
-    let resource = Resource::new(boot9_path, movable_path, sd_path, nand_path)
-        .expect("Failed to load resource");
+    let resource = Resource::new(boot9_path, movable_path, sd_path, nand_path)?;
 
     let save = if let Some(bare) = bare_path {
         println!(
             "WARNING: After modification, you need to sign the CMAC header using other tools."
         );
 
-        resource.open_bare_save(&bare).expect("Failed to open save")
+        resource.open_bare_save(&bare)?
     } else if let Some(id) = nand_id {
-        let id = u32::from_str_radix(&id, 16).expect("Invalid ID");
-        resource.open_nand_save(id).expect("Failed to open save")
+        let id = u32::from_str_radix(&id, 16)?;
+        resource.open_nand_save(id)?
     } else if let Some(id) = sd_id {
-        let id = u64::from_str_radix(&id, 16).expect("Invalid ID");
-        resource.open_sd_save(id).expect("Failed to open save")
+        let id = u64::from_str_radix(&id, 16)?;
+        resource.open_sd_save(id)?
     } else {
         panic!()
     };
@@ -739,7 +738,8 @@ fn main() {
     let mountpoint = std::path::Path::new(&matches.free[0]);
 
     println!("Start mounting");
-    mount(fs, &mountpoint, &options).unwrap();
+    mount(fs, &mountpoint, &options)?;
+    Ok(())
 }
 
 #[cfg(test)]

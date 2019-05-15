@@ -1,10 +1,12 @@
 mod aes_ctr_file;
+mod diff;
 mod difi_partition;
 mod disa;
 mod disk_file;
 mod dpfs_level;
 mod dual_file;
 pub mod error;
+mod ext_data;
 mod fat;
 mod fs;
 mod ivfc_level;
@@ -12,11 +14,11 @@ mod key_engine;
 mod memory_file;
 mod random_access_file;
 pub mod save_data;
+mod save_ext_common;
 mod sd;
 mod signed_file;
 mod sub_file;
 
-use aes_ctr_file::AesCtrFile;
 use disk_file::DiskFile;
 use error::*;
 use key_engine::*;

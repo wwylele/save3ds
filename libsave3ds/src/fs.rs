@@ -471,75 +471,6 @@ impl<
     }
 }
 
-#[derive(ByteStruct, Clone)]
-#[byte_struct_le]
-pub struct SaveDir {
-    pub next: u32,
-    pub sub_dir: u32,
-    pub sub_file: u32,
-    pub padding: u32,
-}
-
-#[derive(ByteStruct, Clone)]
-#[byte_struct_le]
-pub struct SaveFile {
-    pub next: u32,
-    pub padding1: u32,
-    pub block: u32,
-    pub size: u64,
-    pub padding2: u32,
-}
-
-#[derive(ByteStruct, Clone, PartialEq)]
-#[byte_struct_le]
-pub struct SaveKey {
-    parent: u32,
-    name: [u8; 16],
-}
-
-impl FileInfo for SaveFile {
-    fn set_next(&mut self, index: u32) {
-        self.next = index;
-    }
-    fn get_next(&self) -> u32 {
-        self.next
-    }
-}
-
-impl DirInfo for SaveDir {
-    fn set_sub_dir(&mut self, index: u32) {
-        self.sub_dir = index;
-    }
-    fn get_sub_dir(&self) -> u32 {
-        self.sub_dir
-    }
-    fn set_sub_file(&mut self, index: u32) {
-        self.sub_file = index;
-    }
-    fn get_sub_file(&self) -> u32 {
-        self.sub_file
-    }
-    fn set_next(&mut self, index: u32) {
-        self.next = index;
-    }
-    fn get_next(&self) -> u32 {
-        self.next
-    }
-}
-
-impl ParentedKey for SaveKey {
-    type NameType = [u8; 16];
-    fn get_name(&self) -> [u8; 16] {
-        self.name
-    }
-    fn get_parent(&self) -> u32 {
-        self.parent
-    }
-    fn new(parent: u32, name: [u8; 16]) -> SaveKey {
-        SaveKey { parent, name }
-    }
-}
-
 #[cfg(test)]
 mod test {
     use crate::fs::*;
@@ -558,15 +489,11 @@ mod test {
         (&mut m[i], &mut n[0])
     }
 
-    #[test]
-    fn struct_size() {
-        assert_eq!(SaveDir::BYTE_LEN, 16);
-        assert_eq!(SaveFile::BYTE_LEN, 24);
-    }
-
     #[allow(clippy::cyclomatic_complexity)]
     #[test]
     fn fs_fuzz() {
+        use crate::save_data::SaveFile;
+        use crate::save_ext_common::*;
         let mut rng = rand::thread_rng();
         for _ in 0..100 {
             let dir_entry_count = rng.gen_range(10, 1000);
@@ -575,8 +502,8 @@ mod test {
             let dir_table = Rc::new(MemoryFile::new(vec![
                 0;
                 dir_entry_count
-                    * (SaveDir::BYTE_LEN
-                        + SaveKey::BYTE_LEN
+                    * (SaveExtDir::BYTE_LEN
+                        + SaveExtKey::BYTE_LEN
                         + 4)
             ]));
             write_struct(dir_table.as_ref(), 0, U32le { v: 1 }).unwrap();
@@ -590,11 +517,12 @@ mod test {
             .unwrap();
 
             {
-                let meta = MetaTable::<SaveKey, SaveDir>::new(dir_hash.clone(), dir_table.clone())
-                    .unwrap();
+                let meta =
+                    MetaTable::<SaveExtKey, SaveExtDir>::new(dir_hash.clone(), dir_table.clone())
+                        .unwrap();
                 meta.add(
-                    SaveKey::new(0, [0; 16]),
-                    SaveDir {
+                    SaveExtKey::new(0, [0; 16]),
+                    SaveExtDir {
                         next: 0,
                         sub_dir: 0,
                         sub_file: 0,
@@ -611,7 +539,7 @@ mod test {
                 0;
                 file_entry_count
                     * (SaveFile::BYTE_LEN
-                        + SaveKey::BYTE_LEN
+                        + SaveExtKey::BYTE_LEN
                         + 4)
             ]));
 
@@ -625,13 +553,13 @@ mod test {
             )
             .unwrap();
 
-            let fs = FsMeta::<SaveKey, SaveDir, SaveKey, SaveFile>::new(
+            let fs = FsMeta::<SaveExtKey, SaveExtDir, SaveExtKey, SaveFile>::new(
                 dir_hash, dir_table, file_hash, file_table,
             )
             .unwrap();
 
             struct Dir {
-                meta: DirMeta<SaveKey, SaveDir, SaveKey, SaveFile>,
+                meta: DirMeta<SaveExtKey, SaveExtDir, SaveExtKey, SaveFile>,
                 name: [u8; 16],
                 parent: usize,
                 sub_dir_name: HashSet<[u8; 16]>,
@@ -639,14 +567,16 @@ mod test {
             }
 
             struct File {
-                meta: FileMeta<SaveKey, SaveDir, SaveKey, SaveFile>,
+                meta: FileMeta<SaveExtKey, SaveExtDir, SaveExtKey, SaveFile>,
                 name: [u8; 16],
                 parent: usize,
             }
 
             let mut dirs = vec![Dir {
-                meta: DirMeta::<SaveKey, SaveDir, SaveKey, SaveFile>::open_root(fs.clone())
-                    .unwrap(),
+                meta: DirMeta::<SaveExtKey, SaveExtDir, SaveExtKey, SaveFile>::open_root(
+                    fs.clone(),
+                )
+                .unwrap(),
                 name: [0; 16],
                 parent: 0xFFFF_FFFF,
                 sub_dir_name: HashSet::new(),
@@ -679,7 +609,7 @@ mod test {
                         };
                         match dirs[parent].meta.new_sub_dir(
                             name,
-                            SaveDir {
+                            SaveExtDir {
                                 next: 0,
                                 sub_dir: 0,
                                 sub_file: 0,

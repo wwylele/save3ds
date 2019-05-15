@@ -1,17 +1,37 @@
 use crate::disa::Disa;
 use crate::error::*;
 use crate::fat::*;
-use crate::fs;
+use crate::fs::{self, FileInfo};
 use crate::memory_file::MemoryFile;
 use crate::random_access_file::*;
+use crate::save_ext_common::*;
 use crate::signed_file::*;
 use crate::sub_file::SubFile;
 use byte_struct::*;
 use std::rc::Rc;
 
-type FsMeta = fs::FsMeta<fs::SaveKey, fs::SaveDir, fs::SaveKey, fs::SaveFile>;
-type DirMeta = fs::DirMeta<fs::SaveKey, fs::SaveDir, fs::SaveKey, fs::SaveFile>;
-type FileMeta = fs::FileMeta<fs::SaveKey, fs::SaveDir, fs::SaveKey, fs::SaveFile>;
+#[derive(ByteStruct, Clone)]
+#[byte_struct_le]
+pub struct SaveFile {
+    pub next: u32,
+    pub padding1: u32,
+    pub block: u32,
+    pub size: u64,
+    pub padding2: u32,
+}
+
+impl FileInfo for SaveFile {
+    fn set_next(&mut self, index: u32) {
+        self.next = index;
+    }
+    fn get_next(&self) -> u32 {
+        self.next
+    }
+}
+
+type FsMeta = fs::FsMeta<SaveExtKey, SaveExtDir, SaveExtKey, SaveFile>;
+type DirMeta = fs::DirMeta<SaveExtKey, SaveExtDir, SaveExtKey, SaveFile>;
+type FileMeta = fs::FileMeta<SaveExtKey, SaveExtDir, SaveExtKey, SaveFile>;
 
 pub struct NandSaveSigner {
     pub id: u32,
@@ -58,31 +78,6 @@ struct SaveHeader {
     image_size: u64,
     image_block_len: u32,
     padding: u32,
-}
-
-#[derive(ByteStruct)]
-#[byte_struct_le]
-struct FsInfo {
-    unknown: u32,
-    block_len: u32,
-    dir_hash_offset: u64,
-    dir_buckets: u32,
-    p0: u32,
-    file_hash_offset: u64,
-    file_buckets: u32,
-    p1: u32,
-    fat_offset: u64,
-    fat_size: u32,
-    p2: u32,
-    data_offset: u64,
-    data_block_count: u32,
-    p3: u32,
-    dir_table: u64,
-    max_dir: u32,
-    p4: u32,
-    file_table: u64,
-    max_file: u32,
-    p5: u32,
 }
 
 pub struct SaveData {
@@ -158,8 +153,7 @@ impl SaveData {
             Rc::new(SubFile::new(
                 disa[0].clone(),
                 fs_info.dir_table as usize,
-                (fs_info.max_dir + 2) as usize
-                    * (fs::SaveKey::BYTE_LEN + fs::SaveDir::BYTE_LEN + 4),
+                (fs_info.max_dir + 2) as usize * (SaveExtKey::BYTE_LEN + SaveExtDir::BYTE_LEN + 4),
             )?)
         } else {
             let block = (fs_info.dir_table & 0xFFFF_FFFF) as usize;
@@ -170,8 +164,7 @@ impl SaveData {
             Rc::new(SubFile::new(
                 disa[0].clone(),
                 fs_info.file_table as usize,
-                (fs_info.max_file + 1) as usize
-                    * (fs::SaveKey::BYTE_LEN + fs::SaveFile::BYTE_LEN + 4),
+                (fs_info.max_file + 1) as usize * (SaveExtKey::BYTE_LEN + SaveFile::BYTE_LEN + 4),
             )?)
         } else {
             let block = (fs_info.file_table & 0xFFFF_FFFF) as usize;
@@ -362,7 +355,7 @@ impl Dir {
         if self.open_sub_file(name).is_ok() || self.open_sub_dir(name).is_ok() {
             return make_error(Error::AlreadyExist);
         }
-        let dir_info = fs::SaveDir {
+        let dir_info = SaveExtDir {
             next: 0,
             sub_dir: 0,
             sub_file: 0,
@@ -389,7 +382,7 @@ impl Dir {
         };
         match self.meta.new_sub_file(
             name,
-            fs::SaveFile {
+            SaveFile {
                 next: 0,
                 padding1: 0,
                 block: block,
@@ -418,7 +411,7 @@ mod test {
     #[test]
     fn struct_size() {
         assert_eq!(SaveHeader::BYTE_LEN, 0x20);
-        assert_eq!(FsInfo::BYTE_LEN, 0x68);
+        assert_eq!(SaveFile::BYTE_LEN, 24);
     }
 
 }

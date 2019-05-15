@@ -1,3 +1,5 @@
+use std::fmt;
+
 #[derive(Debug)]
 pub enum Error {
     IO(std::io::Error),
@@ -18,6 +20,15 @@ pub enum Error {
     NoMovable,
     NotEmpty,
 }
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // TODO: better UI
+        (self as &fmt::Debug).fmt(f)
+    }
+}
+
+impl std::error::Error for Error {}
 
 impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Error {
