@@ -1,6 +1,8 @@
 use fuse::*;
 use getopts::Options;
-use libc::{EBADF, EEXIST, EIO, EISDIR, ENAMETOOLONG, ENOENT, ENOSPC, ENOTDIR, ENOTEMPTY, EROFS};
+use libc::{
+    EBADF, EEXIST, EIO, EISDIR, ENAMETOOLONG, ENOENT, ENOSPC, ENOSYS, ENOTDIR, ENOTEMPTY, EROFS,
+};
 use libsave3ds::error::*;
 use libsave3ds::save_data::*;
 use libsave3ds::save_ext_common;
@@ -27,7 +29,7 @@ impl<T: save_ext_common::FileSystem> SaveExtFilesystem<T> {
         }
     }
 
-    fn make_dir_attr(&self, ino: u64, sub_file_count: usize) -> FileAttr {
+    fn make_dir_attr(read_only: bool, ino: u64, sub_file_count: usize) -> FileAttr {
         FileAttr {
             ino,
             size: 0,
@@ -37,7 +39,7 @@ impl<T: save_ext_common::FileSystem> SaveExtFilesystem<T> {
             ctime: time::Timespec::new(0, 0),
             crtime: time::Timespec::new(0, 0),
             kind: FileType::Directory,
-            perm: if self.read_only { 0o555 } else { 0o777 },
+            perm: if read_only { 0o555 } else { 0o777 },
             nlink: 2 + sub_file_count as u32,
             uid: 501,
             gid: 20,
@@ -46,7 +48,7 @@ impl<T: save_ext_common::FileSystem> SaveExtFilesystem<T> {
         }
     }
 
-    fn make_file_attr(&self, ino: u64, file_size: usize) -> FileAttr {
+    fn make_file_attr(read_only: bool, ino: u64, file_size: usize) -> FileAttr {
         FileAttr {
             ino,
             size: file_size as u64,
@@ -56,7 +58,7 @@ impl<T: save_ext_common::FileSystem> SaveExtFilesystem<T> {
             ctime: time::Timespec::new(0, 0),
             crtime: time::Timespec::new(0, 0),
             kind: FileType::RegularFile,
-            perm: if self.read_only { 0o444 } else { 0o666 },
+            perm: if read_only { 0o444 } else { 0o666 },
             nlink: 1,
             uid: 501,
             gid: 20,
@@ -189,7 +191,11 @@ impl<T: save_ext_common::FileSystem> Filesystem for SaveExtFilesystem<T> {
 
                     reply.entry(
                         &time::Timespec::new(1, 0),
-                        &self.make_dir_attr(Ino::Dir(T::dir_get_ino(&child)).to_os(), children_len),
+                        &Self::make_dir_attr(
+                            self.read_only,
+                            Ino::Dir(T::dir_get_ino(&child)).to_os(),
+                            children_len,
+                        ),
                         0,
                     );
                     return;
@@ -197,7 +203,8 @@ impl<T: save_ext_common::FileSystem> Filesystem for SaveExtFilesystem<T> {
                 if let Ok(child) = T::open_sub_file(&parent_dir, name_converted) {
                     reply.entry(
                         &time::Timespec::new(1, 0),
-                        &self.make_file_attr(
+                        &Self::make_file_attr(
+                            self.read_only,
                             Ino::File(T::file_get_ino(&child)).to_os(),
                             T::len(&child),
                         ),
@@ -216,7 +223,8 @@ impl<T: save_ext_common::FileSystem> Filesystem for SaveExtFilesystem<T> {
                 if let Ok(file) = T::file_open_ino(self.save.clone(), ino) {
                     reply.attr(
                         &time::Timespec::new(1, 0),
-                        &self.make_file_attr(
+                        &Self::make_file_attr(
+                            self.read_only,
                             Ino::File(T::file_get_ino(&file)).to_os(),
                             T::len(&file),
                         ),
@@ -235,12 +243,80 @@ impl<T: save_ext_common::FileSystem> Filesystem for SaveExtFilesystem<T> {
                     };
                     reply.attr(
                         &time::Timespec::new(1, 0),
-                        &self.make_dir_attr(Ino::Dir(T::dir_get_ino(&dir)).to_os(), children_len),
+                        &Self::make_dir_attr(
+                            self.read_only,
+                            Ino::Dir(T::dir_get_ino(&dir)).to_os(),
+                            children_len,
+                        ),
                     );
                 } else {
                     reply.error(ENOENT);
                 }
             }
+        }
+    }
+
+    fn setattr(
+        &mut self,
+        _req: &Request,
+        ino: u64,
+        _mode: Option<u32>,
+        _uid: Option<u32>,
+        _gid: Option<u32>,
+        size: Option<u64>,
+        _atime: Option<time::Timespec>,
+        _mtime: Option<time::Timespec>,
+        fh: Option<u64>,
+        _crtime: Option<time::Timespec>,
+        _chgtime: Option<time::Timespec>,
+        _bkuptime: Option<time::Timespec>,
+        _flags: Option<u32>,
+        reply: ReplyAttr,
+    ) {
+        match Ino::from_os(ino) {
+            Ino::File(ino) => {
+                let mut file_holder: Option<T::FileType>;
+                let file = if let Some(fh) = fh {
+                    if let Some(file) = self.fh_map.get_mut(&fh) {
+                        file
+                    } else {
+                        reply.error(ENOENT);
+                        return;
+                    }
+                } else if let Some(file) = self
+                    .fh_map
+                    .iter_mut()
+                    .filter(|(_, b)| T::file_get_ino(b) == ino)
+                    .map(|(_, b)| b)
+                    .next()
+                {
+                    // bash stdout redirection would do this when the dest file exists
+                    // TODO: revisit this when implementing safe multi fh
+                    println!("Warning: resize when another fh is opened.");
+                    file
+                } else if let Ok(file) = T::file_open_ino(self.save.clone(), ino) {
+                    file_holder = Some(file);
+                    file_holder.as_mut().unwrap()
+                } else {
+                    reply.error(ENOENT);
+                    return;
+                };
+
+                if let Some(size) = size {
+                    match T::resize(file, size as usize) {
+                        Ok(()) => reply.attr(
+                            &time::Timespec::new(1, 0),
+                            &Self::make_file_attr(
+                                self.read_only,
+                                Ino::File(T::file_get_ino(&file)).to_os(),
+                                T::len(&file),
+                            ),
+                        ),
+                        Err(_) => reply.error(EIO),
+                    }
+                }
+            }
+            Ino::Dir(_) => reply.error(ENOSYS),
         }
     }
 
@@ -269,7 +345,11 @@ impl<T: save_ext_common::FileSystem> Filesystem for SaveExtFilesystem<T> {
                 match T::new_sub_dir(&parent_dir, name_converted) {
                     Ok(child) => reply.entry(
                         &time::Timespec::new(1, 0),
-                        &self.make_dir_attr(Ino::Dir(T::dir_get_ino(&child)).to_os(), 0),
+                        &Self::make_dir_attr(
+                            self.read_only,
+                            Ino::Dir(T::dir_get_ino(&child)).to_os(),
+                            0,
+                        ),
                         0,
                     ),
                     Err(Error::AlreadyExist) => reply.error(EEXIST),
@@ -315,7 +395,11 @@ impl<T: save_ext_common::FileSystem> Filesystem for SaveExtFilesystem<T> {
                 match T::new_sub_file(&parent_dir, name_converted, 0) {
                     Ok(child) => reply.entry(
                         &time::Timespec::new(1, 0),
-                        &self.make_file_attr(Ino::File(T::file_get_ino(&child)).to_os(), 0),
+                        &Self::make_file_attr(
+                            self.read_only,
+                            Ino::File(T::file_get_ino(&child)).to_os(),
+                            0,
+                        ),
                         0,
                     ),
                     Err(Error::AlreadyExist) => reply.error(EEXIST),
