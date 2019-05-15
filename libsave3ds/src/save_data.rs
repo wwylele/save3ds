@@ -216,89 +216,6 @@ impl File {
             len,
         })
     }
-
-    pub fn open_ino(center: Rc<SaveData>, ino: u32) -> Result<File, Error> {
-        let meta = FileMeta::open_ino(center.fs.clone(), ino)?;
-        File::from_meta(center, meta)
-    }
-
-    pub fn rename(&mut self, parent: &Dir, name: [u8; 16]) -> Result<(), Error> {
-        if parent.open_sub_file(name).is_ok() || parent.open_sub_dir(name).is_ok() {
-            return make_error(Error::AlreadyExist);
-        }
-        self.meta.rename(&parent.meta, name)
-    }
-
-    pub fn get_parent_ino(&self) -> u32 {
-        self.meta.get_parent_ino()
-    }
-
-    pub fn get_ino(&self) -> u32 {
-        self.meta.get_ino()
-    }
-
-    pub fn delete(self) -> Result<(), Error> {
-        if let Some(f) = self.data {
-            f.delete()?;
-        }
-        self.meta.delete()
-    }
-
-    pub fn resize(&mut self, len: usize) -> Result<(), Error> {
-        if len == self.len {
-            return Ok(());
-        }
-
-        let mut info = self.meta.get_info()?;
-
-        if self.len == 0 {
-            // zero => non-zero
-            let (fat_file, block) = FatFile::create(
-                self.center.fat.clone(),
-                1 + (len - 1) / self.center.block_len,
-            )?;
-            self.data = Some(fat_file);
-            info.block = block as u32;
-        } else if len == 0 {
-            // non-zero => zero
-            self.data.take().unwrap().delete()?;
-            info.block = 0x8000_0000;
-        } else {
-            self.data
-                .as_mut()
-                .unwrap()
-                .resize(1 + (len - 1) / self.center.block_len)?;
-        }
-
-        info.size = len as u64;
-        self.meta.set_info(info)?;
-
-        self.len = len;
-
-        Ok(())
-    }
-
-    pub fn read(&self, pos: usize, buf: &mut [u8]) -> Result<(), Error> {
-        if pos + buf.len() > self.len {
-            return make_error(Error::OutOfBound);
-        }
-        self.data.as_ref().unwrap().read(pos, buf)
-    }
-
-    pub fn write(&self, pos: usize, buf: &[u8]) -> Result<(), Error> {
-        if pos + buf.len() > self.len {
-            return make_error(Error::OutOfBound);
-        }
-        self.data.as_ref().unwrap().write(pos, buf)
-    }
-
-    pub fn len(&self) -> usize {
-        self.len
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len == 0
-    }
 }
 
 pub struct Dir {
@@ -306,53 +223,142 @@ pub struct Dir {
     meta: DirMeta,
 }
 
-impl Dir {
-    pub fn open_root(center: Rc<SaveData>) -> Result<Dir, Error> {
+pub struct SaveDataFileSystem {}
+impl FileSystem for SaveDataFileSystem {
+    type CenterType = SaveData;
+    type FileType = File;
+    type DirType = Dir;
+
+    fn file_open_ino(center: Rc<Self::CenterType>, ino: u32) -> Result<Self::FileType, Error> {
+        let meta = FileMeta::open_ino(center.fs.clone(), ino)?;
+        File::from_meta(center, meta)
+    }
+
+    fn file_rename(
+        file: &mut Self::FileType,
+        parent: &Self::DirType,
+        name: [u8; 16],
+    ) -> Result<(), Error> {
+        file.meta.rename(&parent.meta, name)
+    }
+
+    fn file_get_parent_ino(file: &Self::FileType) -> u32 {
+        file.meta.get_parent_ino()
+    }
+
+    fn file_get_ino(file: &Self::FileType) -> u32 {
+        file.meta.get_ino()
+    }
+
+    fn file_delete(file: Self::FileType) -> Result<(), Error> {
+        if let Some(f) = file.data {
+            f.delete()?;
+        }
+        file.meta.delete()
+    }
+
+    fn resize(file: &mut Self::FileType, len: usize) -> Result<(), Error> {
+        if len == file.len {
+            return Ok(());
+        }
+
+        let mut info = file.meta.get_info()?;
+
+        if file.len == 0 {
+            // zero => non-zero
+            let (fat_file, block) = FatFile::create(
+                file.center.fat.clone(),
+                1 + (len - 1) / file.center.block_len,
+            )?;
+            file.data = Some(fat_file);
+            info.block = block as u32;
+        } else if len == 0 {
+            // non-zero => zero
+            file.data.take().unwrap().delete()?;
+            info.block = 0x8000_0000;
+        } else {
+            file.data
+                .as_mut()
+                .unwrap()
+                .resize(1 + (len - 1) / file.center.block_len)?;
+        }
+
+        info.size = len as u64;
+        file.meta.set_info(info)?;
+
+        file.len = len;
+
+        Ok(())
+    }
+
+    fn read(file: &Self::FileType, pos: usize, buf: &mut [u8]) -> Result<(), Error> {
+        if pos + buf.len() > file.len {
+            return make_error(Error::OutOfBound);
+        }
+        file.data.as_ref().unwrap().read(pos, buf)
+    }
+
+    fn write(file: &Self::FileType, pos: usize, buf: &[u8]) -> Result<(), Error> {
+        if pos + buf.len() > file.len {
+            return make_error(Error::OutOfBound);
+        }
+        file.data.as_ref().unwrap().write(pos, buf)
+    }
+
+    fn len(file: &Self::FileType) -> usize {
+        file.len
+    }
+
+    fn open_root(center: Rc<Self::CenterType>) -> Result<Self::DirType, Error> {
         let meta = DirMeta::open_root(center.fs.clone())?;
         Ok(Dir { center, meta })
     }
 
-    pub fn open_ino(center: Rc<SaveData>, ino: u32) -> Result<Dir, Error> {
+    fn dir_open_ino(center: Rc<Self::CenterType>, ino: u32) -> Result<Self::DirType, Error> {
         let meta = DirMeta::open_ino(center.fs.clone(), ino)?;
         Ok(Dir { center, meta })
     }
 
-    pub fn rename(&mut self, parent: &Dir, name: [u8; 16]) -> Result<(), Error> {
-        if parent.open_sub_file(name).is_ok() || parent.open_sub_dir(name).is_ok() {
+    fn dir_rename(
+        dir: &mut Self::DirType,
+        parent: &Self::DirType,
+        name: [u8; 16],
+    ) -> Result<(), Error> {
+        if Self::open_sub_file(&parent, name).is_ok() || Self::open_sub_dir(&parent, name).is_ok() {
             return make_error(Error::AlreadyExist);
         }
-        self.meta.rename(&parent.meta, name)
+        dir.meta.rename(&parent.meta, name)
     }
 
-    pub fn get_parent_ino(&self) -> u32 {
-        self.meta.get_parent_ino()
+    fn dir_get_parent_ino(dir: &Self::DirType) -> u32 {
+        dir.meta.get_parent_ino()
     }
 
-    pub fn get_ino(&self) -> u32 {
-        self.meta.get_ino()
+    fn dir_get_ino(dir: &Self::DirType) -> u32 {
+        dir.meta.get_ino()
     }
 
-    pub fn open_sub_dir(&self, name: [u8; 16]) -> Result<Dir, Error> {
+    fn open_sub_dir(dir: &Self::DirType, name: [u8; 16]) -> Result<Self::DirType, Error> {
         Ok(Dir {
-            center: self.center.clone(),
-            meta: self.meta.open_sub_dir(name)?,
+            center: dir.center.clone(),
+            meta: dir.meta.open_sub_dir(name)?,
         })
     }
 
-    pub fn open_sub_file(&self, name: [u8; 16]) -> Result<File, Error> {
-        File::from_meta(self.center.clone(), self.meta.open_sub_file(name)?)
+    fn open_sub_file(dir: &Self::DirType, name: [u8; 16]) -> Result<Self::FileType, Error> {
+        File::from_meta(dir.center.clone(), dir.meta.open_sub_file(name)?)
     }
 
-    pub fn list_sub_dir(&self) -> Result<Vec<([u8; 16], u32)>, Error> {
-        self.meta.list_sub_dir()
+    fn list_sub_dir(dir: &Self::DirType) -> Result<Vec<([u8; 16], u32)>, Error> {
+        dir.meta.list_sub_dir()
     }
 
-    pub fn list_sub_file(&self) -> Result<Vec<([u8; 16], u32)>, Error> {
-        self.meta.list_sub_file()
+    fn list_sub_file(dir: &Self::DirType) -> Result<Vec<([u8; 16], u32)>, Error> {
+        dir.meta.list_sub_file()
     }
 
-    pub fn new_sub_dir(&self, name: [u8; 16]) -> Result<Dir, Error> {
-        if self.open_sub_file(name).is_ok() || self.open_sub_dir(name).is_ok() {
+    fn new_sub_dir(dir: &Self::DirType, name: [u8; 16]) -> Result<Self::DirType, Error> {
+        if Self::open_sub_file(dir, name).is_ok() || Self::open_sub_dir(dir, name).is_ok() {
             return make_error(Error::AlreadyExist);
         }
         let dir_info = SaveExtDir {
@@ -362,25 +368,27 @@ impl Dir {
             padding: 0,
         };
         Ok(Dir {
-            center: self.center.clone(),
-            meta: self.meta.new_sub_dir(name, dir_info)?,
+            center: dir.center.clone(),
+            meta: dir.meta.new_sub_dir(name, dir_info)?,
         })
     }
 
-    pub fn new_sub_file(&self, name: [u8; 16], len: usize) -> Result<File, Error> {
-        if self.open_sub_file(name).is_ok() || self.open_sub_dir(name).is_ok() {
+    fn new_sub_file(
+        dir: &Self::DirType,
+        name: [u8; 16],
+        len: usize,
+    ) -> Result<Self::FileType, Error> {
+        if Self::open_sub_file(dir, name).is_ok() || Self::open_sub_dir(dir, name).is_ok() {
             return make_error(Error::AlreadyExist);
         }
         let (fat_file, block) = if len == 0 {
             (None, 0x8000_0000)
         } else {
-            let (fat_file, block) = FatFile::create(
-                self.center.fat.clone(),
-                1 + (len - 1) / self.center.block_len,
-            )?;
+            let (fat_file, block) =
+                FatFile::create(dir.center.fat.clone(), 1 + (len - 1) / dir.center.block_len)?;
             (Some(fat_file), block as u32)
         };
-        match self.meta.new_sub_file(
+        match dir.meta.new_sub_file(
             name,
             SaveFile {
                 next: 0,
@@ -396,115 +404,12 @@ impl Dir {
                 }
                 Err(e)
             }
-            Ok(meta) => File::from_meta(self.center.clone(), meta),
+            Ok(meta) => File::from_meta(dir.center.clone(), meta),
         }
     }
 
-    pub fn delete(self) -> Result<(), Error> {
-        self.meta.delete()
-    }
-}
-
-pub struct SaveDataFileSystem {}
-impl FileSystem for SaveDataFileSystem {
-    type CenterType = SaveData;
-    type FileType = File;
-    type DirType = Dir;
-
-    fn file_open_ino(center: Rc<Self::CenterType>, ino: u32) -> Result<Self::FileType, Error> {
-        File::open_ino(center, ino)
-    }
-
-    fn file_rename(
-        file: &mut Self::FileType,
-        parent: &Self::DirType,
-        name: [u8; 16],
-    ) -> Result<(), Error> {
-        file.rename(parent, name)
-    }
-
-    fn file_get_parent_ino(file: &Self::FileType) -> u32 {
-        file.get_parent_ino()
-    }
-
-    fn file_get_ino(file: &Self::FileType) -> u32 {
-        file.get_ino()
-    }
-
-    fn file_delete(file: Self::FileType) -> Result<(), Error> {
-        file.delete()
-    }
-
-    fn resize(file: &mut Self::FileType, len: usize) -> Result<(), Error> {
-        file.resize(len)
-    }
-
-    fn read(file: &Self::FileType, pos: usize, buf: &mut [u8]) -> Result<(), Error> {
-        file.read(pos, buf)
-    }
-
-    fn write(file: &Self::FileType, pos: usize, buf: &[u8]) -> Result<(), Error> {
-        file.write(pos, buf)
-    }
-
-    fn len(file: &Self::FileType) -> usize {
-        file.len()
-    }
-
-    fn open_root(center: Rc<Self::CenterType>) -> Result<Self::DirType, Error> {
-        Dir::open_root(center)
-    }
-
-    fn dir_open_ino(center: Rc<Self::CenterType>, ino: u32) -> Result<Self::DirType, Error> {
-        Dir::open_ino(center, ino)
-    }
-
-    fn dir_rename(
-        dir: &mut Self::DirType,
-        parent: &Self::DirType,
-        name: [u8; 16],
-    ) -> Result<(), Error> {
-        dir.rename(parent, name)
-    }
-
-    fn dir_get_parent_ino(dir: &Self::DirType) -> u32 {
-        dir.get_parent_ino()
-    }
-
-    fn dir_get_ino(dir: &Self::DirType) -> u32 {
-        dir.get_ino()
-    }
-
-    fn open_sub_dir(dir: &Self::DirType, name: [u8; 16]) -> Result<Self::DirType, Error> {
-        dir.open_sub_dir(name)
-    }
-
-    fn open_sub_file(dir: &Self::DirType, name: [u8; 16]) -> Result<Self::FileType, Error> {
-        dir.open_sub_file(name)
-    }
-
-    fn list_sub_dir(dir: &Self::DirType) -> Result<Vec<([u8; 16], u32)>, Error> {
-        dir.list_sub_dir()
-    }
-
-    fn list_sub_file(dir: &Self::DirType) -> Result<Vec<([u8; 16], u32)>, Error> {
-        dir.list_sub_file()
-    }
-
-    fn new_sub_dir(dir: &Self::DirType, name: [u8; 16]) -> Result<Self::DirType, Error> {
-        dir.new_sub_dir(name)
-    }
-
-    fn new_sub_file(
-        dir: &Self::DirType,
-        name: [u8; 16],
-        len: usize,
-    ) -> Result<Self::FileType, Error> {
-        dir.new_sub_file(name, len)
-    }
-
     fn dir_delete(dir: Self::DirType) -> Result<(), Error> {
-        dir.delete()
+        dir.meta.delete()
     }
 
     fn commit(center: &Self::CenterType) -> Result<(), Error> {

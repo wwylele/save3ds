@@ -1,3 +1,4 @@
+/*
 use libsave3ds::save_data::*;
 use libsave3ds::*;
 use std::boxed::Box;
@@ -266,3 +267,4 @@ pub unsafe extern "C" fn save3ds_entry_list_get(
     *name = entry.0;
     *ino = entry.1;
 }
+*/
