@@ -2,6 +2,8 @@ use crate::aes_ctr_file::AesCtrFile;
 use crate::disk_file::DiskFile;
 use crate::error::*;
 use crate::key_engine::*;
+use crate::random_access_file::*;
+use crate::sd_nand_common::*;
 use sha2::*;
 use std::path::*;
 use std::rc::Rc;
@@ -24,8 +26,10 @@ impl Sd {
         let key = scramble(key_x, key_y);
         Ok(Sd { path, key })
     }
+}
 
-    pub fn open(&self, path: &[&str]) -> Result<AesCtrFile, Error> {
+impl SdNandFileSystem for Sd {
+    fn open(&self, path: &[&str]) -> Result<Rc<RandomAccessFile>, Error> {
         let file_path = path.iter().fold(self.path.clone(), |a, b| a.join(b));
         let file = Rc::new(DiskFile::new(
             std::fs::OpenOptions::new()
@@ -51,6 +55,6 @@ impl Sd {
             *c = hash[i] ^ hash[i + 16];
         }
 
-        Ok(AesCtrFile::new(file, self.key, ctr))
+        Ok(Rc::new(AesCtrFile::new(file, self.key, ctr)))
     }
 }

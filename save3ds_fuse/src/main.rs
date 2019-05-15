@@ -775,9 +775,10 @@ fn main() -> Result<(), Box<std::error::Error>> {
     opts.optflag("r", "readonly", "mount as read-only file system");
     opts.optopt("", "bare", "mount a bare DISA file", "FILE");
     opts.optopt("", "sd", "SD root path", "DIR");
-    opts.optopt("", "sdext", "mount the SD ext data with the ID", "ID");
+    opts.optopt("", "sdext", "mount the SD Extdata with the ID", "ID");
     opts.optopt("", "sdsave", "mount the SD save with the ID", "ID");
     opts.optopt("", "nand", "NAND root path", "DIR");
+    opts.optopt("", "nandext", "mount the NAND Extdata with the ID", "ID");
     opts.optopt("", "nandsave", "mount the NAND save with the ID", "ID");
 
     let matches = match opts.parse(&args[1..]) {
@@ -808,17 +809,24 @@ fn main() -> Result<(), Box<std::error::Error>> {
     let sd_save_id = matches.opt_str("sdsave");
     let sd_ext_id = matches.opt_str("sdext");
     let nand_path = matches.opt_str("nand");
+    let nand_ext_id = matches.opt_str("nandext");
     let nand_save_id = matches.opt_str("nandsave");
 
-    if [&sd_save_id, &sd_ext_id, &nand_save_id, &bare_path]
-        .iter()
-        .map(|x| if x.is_none() { 0 } else { 1 })
-        .sum::<i32>()
+    if [
+        &sd_save_id,
+        &sd_ext_id,
+        &nand_save_id,
+        &nand_ext_id,
+        &bare_path,
+    ]
+    .iter()
+    .map(|x| if x.is_none() { 0 } else { 1 })
+    .sum::<i32>()
         != 1
     {
         println!(
             "One and only one of the following arguments must be supplied:
-    --sdext, --sdsave, --nandsave, --bare"
+    --sdext, --sdsave, --nandsave, --nandext, --bare"
         );
         return Ok(());
     }
@@ -859,6 +867,13 @@ fn main() -> Result<(), Box<std::error::Error>> {
         let id = u64::from_str_radix(&id, 16)?;
         mount(
             SaveExtFilesystem::<ExtDataFileSystem>::new(resource.open_sd_ext(id)?, read_only),
+            &mountpoint,
+            &options,
+        )?;
+    } else if let Some(id) = nand_ext_id {
+        let id = u64::from_str_radix(&id, 16)?;
+        mount(
+            SaveExtFilesystem::<ExtDataFileSystem>::new(resource.open_nand_ext(id)?, read_only),
             &mountpoint,
             &options,
         )?;

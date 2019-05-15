@@ -29,6 +29,7 @@ pub struct Diff {
     table_upper: Rc<DualFile>,
     table_lower: Rc<IvfcLevel>,
     partition: Rc<DifiPartition>,
+    unique_id: u64,
 }
 
 impl Diff {
@@ -89,6 +90,7 @@ impl Diff {
             table_upper,
             table_lower,
             partition,
+            unique_id: header.unique_id,
         })
     }
 
@@ -101,6 +103,10 @@ impl Diff {
 
     pub fn partition(&self) -> &Rc<DifiPartition> {
         &self.partition
+    }
+
+    pub fn unique_id(&self) -> u64 {
+        self.unique_id
     }
 }
 #[cfg(test)]

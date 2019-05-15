@@ -20,6 +20,7 @@ pub enum Error {
     NoMovable,
     NotEmpty,
     Unsupported,
+    UniqueIdMismatch,
 }
 
 impl fmt::Display for Error {

@@ -2,10 +2,9 @@ use crate::diff::Diff;
 use crate::error::*;
 use crate::fat::*;
 use crate::fs_meta::{self, FileInfo};
-use crate::memory_file::MemoryFile;
 use crate::random_access_file::*;
 use crate::save_ext_common::*;
-use crate::sd::Sd;
+use crate::sd_nand_common::*;
 use crate::signed_file::*;
 use crate::sub_file::SubFile;
 use byte_struct::*;
@@ -68,7 +67,8 @@ struct ExtHeader {
 }
 
 pub struct ExtData {
-    sd: Rc<Sd>,
+    sd_nand: Rc<SdNandFileSystem>,
+    base_path: Vec<String>,
     id: u64,
     fs: Rc<FsMeta>,
     meta_file: Diff,
@@ -76,12 +76,21 @@ pub struct ExtData {
 }
 
 impl ExtData {
-    pub fn new(sd: Rc<Sd>, id: u64, key: [u8; 16]) -> Result<Rc<ExtData>, Error> {
+    pub fn new(
+        sd_nand: Rc<SdNandFileSystem>,
+        base_path: Vec<String>,
+        id: u64,
+        key: [u8; 16],
+    ) -> Result<Rc<ExtData>, Error> {
         let id_high = format!("{:08x}", id >> 32);
         let id_low = format!("{:08x}", id & 0xFFFF_FFFF);
-        let meta_path = ["extdata", &id_high, &id_low, "00000000", "00000001"];
+        let meta_path: Vec<&str> = base_path
+            .iter()
+            .map(|s| s as &str)
+            .chain([&id_high, &id_low, "00000000", "00000001"].iter().cloned())
+            .collect();
         let meta_file = Diff::new(
-            Rc::new(sd.open(&meta_path)?),
+            sd_nand.open(&meta_path)?,
             Some((
                 Box::new(ExtSigner {
                     id,
@@ -142,7 +151,8 @@ impl ExtData {
         let fs = FsMeta::new(dir_hash, dir_table, file_hash, file_table)?;
 
         Ok(Rc::new(ExtData {
-            sd,
+            sd_nand,
+            base_path,
             id,
             fs,
             meta_file,
@@ -166,19 +176,31 @@ impl File {
         let fid_low = file_index % 126;
         let fid_high_s = format!("{:08x}", fid_high);
         let fid_low_s = format!("{:08x}", fid_low);
-        let path = ["extdata", &id_high, &id_low, &fid_high_s, &fid_low_s];
+        let path: Vec<&str> = center
+            .base_path
+            .iter()
+            .map(|s| s as &str)
+            .chain(
+                [&id_high, &id_low, &fid_high_s, &fid_low_s]
+                    .iter()
+                    .map(|s| s as &str),
+            )
+            .collect();
         let data = Diff::new(
-            Rc::new(center.sd.open(&path)?),
+            center.sd_nand.open(&path)?,
             Some((
                 Box::new(ExtSigner {
                     id: center.id,
-                    sub_id: Some(((fid_high as u64) << 32) | (fid_low as u64)),
+                    sub_id: Some((u64::from(fid_high) << 32) | u64::from(fid_low)),
                 }),
                 center.key,
             )),
         )?;
 
-        //let info = meta.get_info()?;
+        let info = meta.get_info()?;
+        if info.unique_id != data.unique_id() {
+            return make_error(Error::UniqueIdMismatch);
+        }
         Ok(File { center, meta, data })
     }
 

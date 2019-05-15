@@ -12,10 +12,12 @@ mod fs_meta;
 mod ivfc_level;
 mod key_engine;
 mod memory_file;
+mod nand;
 mod random_access_file;
 pub mod save_data;
 pub mod save_ext_common;
 mod sd;
+mod sd_nand_common;
 mod signed_file;
 mod sub_file;
 
@@ -23,8 +25,10 @@ use disk_file::DiskFile;
 use error::*;
 use ext_data::*;
 use key_engine::*;
+use nand::Nand;
 use save_data::*;
 use sd::Sd;
+use sd_nand_common::*;
 use sha2::*;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::*;
@@ -43,7 +47,7 @@ fn hash_movable(key: [u8; 16]) -> String {
 
 pub struct Resource {
     sd: Option<Rc<Sd>>,
-    nand_path: Option<PathBuf>,
+    nand: Option<Rc<Nand>>,
     key_x_sign: Option<[u8; 16]>,
     key_y: Option<[u8; 16]>,
 }
@@ -55,8 +59,6 @@ impl Resource {
         sd_path: Option<String>,
         nand_path: Option<String>,
     ) -> Result<Resource, Error> {
-        let nand_path = nand_path.map(|s| Path::new(&s).to_owned());
-
         let (key_x_sign, key_x_dec) = if let Some(boot9) = boot9_path {
             let mut boot9 = std::fs::File::open(boot9)?;
             let mut key_x_sign = [0; 16];
@@ -70,7 +72,7 @@ impl Resource {
         };
 
         let movable = if let Some(nand_path) = &nand_path {
-            Some(nand_path.join("private").join("movable.sed"))
+            Some(PathBuf::from(nand_path).join("private").join("movable.sed"))
         } else {
             movable_path.map(|s| Path::new(&s).to_owned())
         };
@@ -91,9 +93,15 @@ impl Resource {
             None
         };
 
+        let nand = if let Some(nand_path) = nand_path {
+            Some(Rc::new(Nand::new(&nand_path)?))
+        } else {
+            None
+        };
+
         Ok(Resource {
             sd,
-            nand_path,
+            nand,
             key_x_sign,
             key_y,
         })
@@ -102,6 +110,7 @@ impl Resource {
     pub fn open_sd_ext(&self, id: u64) -> Result<Rc<ExtData>, Error> {
         ExtData::new(
             self.sd.as_ref().ok_or(Error::NoSd)?.clone(),
+            vec!["extdata".to_owned()],
             id,
             scramble(
                 self.key_x_sign.ok_or(Error::NoBoot9)?,
@@ -115,7 +124,7 @@ impl Resource {
         let id_low = format!("{:08x}", id & 0xFFFF_FFFF);
         let sub_path = ["title", &id_high, &id_low, "data", "00000001.sav"];
 
-        let dec_file = Rc::new(self.sd.as_ref().ok_or(Error::NoSd)?.open(&sub_path)?);
+        let dec_file = self.sd.as_ref().ok_or(Error::NoSd)?.open(&sub_path)?;
 
         SaveData::new(
             dec_file,
@@ -130,22 +139,13 @@ impl Resource {
     }
 
     pub fn open_nand_save(&self, id: u32) -> Result<Rc<SaveData>, Error> {
-        let path = self
-            .nand_path
-            .as_ref()
-            .ok_or(Error::NoNand)?
-            .join("data")
-            .join(hash_movable(self.key_y.ok_or(Error::NoNand)?))
-            .join("sysdata")
-            .join(format!("{:08x}", id))
-            .join("00000000");
-        let file = Rc::new(DiskFile::new(
-            std::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(path)?,
-        )?);
-
+        let file = self.nand.as_ref().ok_or(Error::NoNand)?.open(&[
+            "data",
+            &hash_movable(self.key_y.ok_or(Error::NoNand)?),
+            "sysdata",
+            &format!("{:08x}", id),
+            "00000000",
+        ])?;
         SaveData::new(
             file,
             SaveDataType::Nand(
@@ -154,6 +154,22 @@ impl Resource {
                     self.key_y.ok_or(Error::NoNand)?,
                 ),
                 id,
+            ),
+        )
+    }
+
+    pub fn open_nand_ext(&self, id: u64) -> Result<Rc<ExtData>, Error> {
+        ExtData::new(
+            self.nand.as_ref().ok_or(Error::NoNand)?.clone(),
+            vec![
+                "data".to_owned(),
+                hash_movable(self.key_y.ok_or(Error::NoNand)?),
+                "extdata".to_owned(),
+            ],
+            id,
+            scramble(
+                self.key_x_sign.ok_or(Error::NoBoot9)?,
+                self.key_y.ok_or(Error::NoMovable)?,
             ),
         )
     }
