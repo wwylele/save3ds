@@ -4,6 +4,7 @@ use libc::{
     EBADF, EEXIST, EIO, EISDIR, ENAMETOOLONG, ENOENT, ENOSPC, ENOSYS, ENOTDIR, ENOTEMPTY, EROFS,
 };
 use libsave3ds::error::*;
+use libsave3ds::ext_data::*;
 use libsave3ds::save_data::*;
 use libsave3ds::save_ext_common;
 use libsave3ds::Resource;
@@ -161,6 +162,11 @@ impl<T: save_ext_common::FileSystem> Drop for SaveExtFilesystem<T> {
 }
 
 impl<T: save_ext_common::FileSystem> Filesystem for SaveExtFilesystem<T> {
+    fn init(&mut self, _req: &Request) -> Result<(), i32> {
+        println!("Initialized");
+        Ok(())
+    }
+
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         let name_converted = if let Some(n) = name_os_to_3ds(name) {
             n
@@ -769,6 +775,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
     opts.optflag("r", "readonly", "mount as read-only file system");
     opts.optopt("", "bare", "mount a bare DISA file", "FILE");
     opts.optopt("", "sd", "SD root path", "DIR");
+    opts.optopt("", "sdext", "mount the SD ext data with the ID", "ID");
     opts.optopt("", "sdsave", "mount the SD save with the ID", "ID");
     opts.optopt("", "nand", "NAND root path", "DIR");
     opts.optopt("", "nandsave", "mount the NAND save with the ID", "ID");
@@ -792,48 +799,72 @@ fn main() -> Result<(), Box<std::error::Error>> {
         return Ok(());
     }
 
+    let mountpoint = std::path::Path::new(&matches.free[0]);
+
     let boot9_path = matches.opt_str("boot9");
     let movable_path = matches.opt_str("movable");
     let bare_path = matches.opt_str("bare");
     let sd_path = matches.opt_str("sd");
-    let sd_id = matches.opt_str("sdsave");
+    let sd_save_id = matches.opt_str("sdsave");
+    let sd_ext_id = matches.opt_str("sdext");
     let nand_path = matches.opt_str("nand");
-    let nand_id = matches.opt_str("nandsave");
+    let nand_save_id = matches.opt_str("nandsave");
 
-    if [&sd_id, &nand_id, &bare_path]
+    if [&sd_save_id, &sd_ext_id, &nand_save_id, &bare_path]
         .iter()
         .map(|x| if x.is_none() { 0 } else { 1 })
         .sum::<i32>()
         != 1
     {
-        println!("One and only one of the following arguments must be supplied: --sdsave, --nandsave, --bare");
+        println!(
+            "One and only one of the following arguments must be supplied:
+    --sdext, --sdsave, --nandsave, --bare"
+        );
         return Ok(());
     }
 
     let resource = Resource::new(boot9_path, movable_path, sd_path, nand_path)?;
 
-    let save = if let Some(bare) = bare_path {
+    let read_only = matches.opt_present("r");
+    let options = [];
+
+    if let Some(bare) = bare_path {
         println!(
             "WARNING: After modification, you need to sign the CMAC header using other tools."
         );
 
-        resource.open_bare_save(&bare)?
-    } else if let Some(id) = nand_id {
+        mount(
+            SaveExtFilesystem::<SaveDataFileSystem>::new(
+                resource.open_bare_save(&bare)?,
+                read_only,
+            ),
+            &mountpoint,
+            &options,
+        )?;
+    } else if let Some(id) = nand_save_id {
         let id = u32::from_str_radix(&id, 16)?;
-        resource.open_nand_save(id)?
-    } else if let Some(id) = sd_id {
+        mount(
+            SaveExtFilesystem::<SaveDataFileSystem>::new(resource.open_nand_save(id)?, read_only),
+            &mountpoint,
+            &options,
+        )?;
+    } else if let Some(id) = sd_save_id {
         let id = u64::from_str_radix(&id, 16)?;
-        resource.open_sd_save(id)?
+        mount(
+            SaveExtFilesystem::<SaveDataFileSystem>::new(resource.open_sd_save(id)?, read_only),
+            &mountpoint,
+            &options,
+        )?;
+    } else if let Some(id) = sd_ext_id {
+        let id = u64::from_str_radix(&id, 16)?;
+        mount(
+            SaveExtFilesystem::<ExtDataFileSystem>::new(resource.open_sd_ext(id)?, read_only),
+            &mountpoint,
+            &options,
+        )?;
     } else {
         panic!()
     };
-
-    let fs = SaveExtFilesystem::<SaveDataFileSystem>::new(save, matches.opt_present("r"));
-    let options = [];
-    let mountpoint = std::path::Path::new(&matches.free[0]);
-
-    println!("Start mounting");
-    mount(fs, &mountpoint, &options)?;
     Ok(())
 }
 

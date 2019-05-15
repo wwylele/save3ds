@@ -21,6 +21,7 @@ mod sub_file;
 
 use disk_file::DiskFile;
 use error::*;
+use ext_data::*;
 use key_engine::*;
 use save_data::*;
 use sd::Sd;
@@ -41,7 +42,7 @@ fn hash_movable(key: [u8; 16]) -> String {
 }
 
 pub struct Resource {
-    sd: Option<Sd>,
+    sd: Option<Rc<Sd>>,
     nand_path: Option<PathBuf>,
     key_x_sign: Option<[u8; 16]>,
     key_y: Option<[u8; 16]>,
@@ -85,7 +86,7 @@ impl Resource {
         };
 
         let sd = if let (Some(sd), Some(x), Some(y)) = (sd_path, key_x_dec, key_y) {
-            Some(Sd::new(&sd, x, y)?)
+            Some(Rc::new(Sd::new(&sd, x, y)?))
         } else {
             None
         };
@@ -96,6 +97,17 @@ impl Resource {
             key_x_sign,
             key_y,
         })
+    }
+
+    pub fn open_sd_ext(&self, id: u64) -> Result<Rc<ExtData>, Error> {
+        ExtData::new(
+            self.sd.as_ref().ok_or(Error::NoSd)?.clone(),
+            id,
+            scramble(
+                self.key_x_sign.ok_or(Error::NoBoot9)?,
+                self.key_y.ok_or(Error::NoMovable)?,
+            ),
+        )
     }
 
     pub fn open_sd_save(&self, id: u64) -> Result<Rc<SaveData>, Error> {
@@ -110,7 +122,7 @@ impl Resource {
             SaveDataType::Sd(
                 scramble(
                     self.key_x_sign.ok_or(Error::NoBoot9)?,
-                    self.key_y.ok_or(Error::NoNand)?,
+                    self.key_y.ok_or(Error::NoMovable)?,
                 ),
                 id,
             ),

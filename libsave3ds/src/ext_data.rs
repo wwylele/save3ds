@@ -34,6 +34,22 @@ type FsMeta = fs_meta::FsMeta<SaveExtKey, SaveExtDir, SaveExtKey, ExtFile>;
 type DirMeta = fs_meta::DirMeta<SaveExtKey, SaveExtDir, SaveExtKey, ExtFile>;
 type FileMeta = fs_meta::FileMeta<SaveExtKey, SaveExtDir, SaveExtKey, ExtFile>;
 
+pub struct ExtSigner {
+    pub id: u64,
+    pub sub_id: Option<u64>,
+}
+
+impl Signer for ExtSigner {
+    fn block(&self, mut data: Vec<u8>) -> Vec<u8> {
+        let mut result = Vec::from(&b"CTR-EXT0"[..]);
+        result.extend(&self.id.to_le_bytes());
+        result.extend(&(if self.sub_id.is_some() { 1u32 } else { 0u32 }).to_le_bytes());
+        result.extend(&self.sub_id.unwrap_or(0).to_le_bytes());
+        result.append(&mut data);
+        result
+    }
+}
+
 #[derive(ByteStruct)]
 #[byte_struct_le]
 struct ExtHeader {
@@ -55,14 +71,25 @@ pub struct ExtData {
     sd: Rc<Sd>,
     id: u64,
     fs: Rc<FsMeta>,
+    meta_file: Diff,
+    key: [u8; 16],
 }
 
 impl ExtData {
-    pub fn new(sd: Rc<Sd>, id: u64) -> Result<ExtData, Error> {
+    pub fn new(sd: Rc<Sd>, id: u64, key: [u8; 16]) -> Result<Rc<ExtData>, Error> {
         let id_high = format!("{:08x}", id >> 32);
         let id_low = format!("{:08x}", id & 0xFFFF_FFFF);
         let meta_path = ["extdata", &id_high, &id_low, "00000000", "00000001"];
-        let meta_file = Diff::new(Rc::new(sd.open(&meta_path)?), None)?;
+        let meta_file = Diff::new(
+            Rc::new(sd.open(&meta_path)?),
+            Some((
+                Box::new(ExtSigner {
+                    id,
+                    sub_id: Some(1),
+                }),
+                key,
+            )),
+        )?;
 
         let header: ExtHeader = read_struct(meta_file.partition().as_ref(), 0)?;
         if header.magic != *b"VSXE" || header.version != 0x30000 {
@@ -114,7 +141,13 @@ impl ExtData {
 
         let fs = FsMeta::new(dir_hash, dir_table, file_hash, file_table)?;
 
-        Ok(ExtData { sd, id, fs })
+        Ok(Rc::new(ExtData {
+            sd,
+            id,
+            fs,
+            meta_file,
+            key,
+        }))
     }
 }
 
@@ -129,49 +162,29 @@ impl File {
         let file_index = meta.get_ino() + 1;
         let id_high = format!("{:08x}", center.id >> 32);
         let id_low = format!("{:08x}", center.id & 0xFFFF_FFFF);
-        let fid_high = format!("{:08x}", file_index / 126);
-        let fid_low = format!("{:08x}", file_index % 126);
-        let path = ["extdata", &id_high, &id_low, &fid_high, &fid_low];
-        let data = Diff::new(Rc::new(center.sd.open(&path)?), None)?;
+        let fid_high = file_index / 126;
+        let fid_low = file_index % 126;
+        let fid_high_s = format!("{:08x}", fid_high);
+        let fid_low_s = format!("{:08x}", fid_low);
+        let path = ["extdata", &id_high, &id_low, &fid_high_s, &fid_low_s];
+        let data = Diff::new(
+            Rc::new(center.sd.open(&path)?),
+            Some((
+                Box::new(ExtSigner {
+                    id: center.id,
+                    sub_id: Some(((fid_high as u64) << 32) | (fid_low as u64)),
+                }),
+                center.key,
+            )),
+        )?;
 
-        let info = meta.get_info()?;
+        //let info = meta.get_info()?;
         Ok(File { center, meta, data })
     }
 
     pub fn open_ino(center: Rc<ExtData>, ino: u32) -> Result<File, Error> {
         let meta = FileMeta::open_ino(center.fs.clone(), ino)?;
         File::from_meta(center, meta)
-    }
-
-    pub fn rename(&mut self, parent: &Dir, name: [u8; 16]) -> Result<(), Error> {
-        if parent.open_sub_file(name).is_ok() || parent.open_sub_dir(name).is_ok() {
-            return make_error(Error::AlreadyExist);
-        }
-        self.meta.rename(&parent.meta, name)
-    }
-
-    pub fn get_parent_ino(&self) -> u32 {
-        self.meta.get_parent_ino()
-    }
-
-    pub fn get_ino(&self) -> u32 {
-        self.meta.get_ino()
-    }
-
-    pub fn read(&self, pos: usize, buf: &mut [u8]) -> Result<(), Error> {
-        self.data.partition().read(pos, buf)
-    }
-
-    pub fn write(&self, pos: usize, buf: &[u8]) -> Result<(), Error> {
-        self.data.partition().write(pos, buf)
-    }
-
-    pub fn len(&self) -> usize {
-        self.data.partition().len()
-    }
-
-    pub fn commit(&self) {
-        self.data.commit();
     }
 }
 
@@ -180,53 +193,95 @@ pub struct Dir {
     meta: DirMeta,
 }
 
-impl Dir {
-    pub fn open_root(center: Rc<ExtData>) -> Result<Dir, Error> {
+pub struct ExtDataFileSystem {}
+impl FileSystem for ExtDataFileSystem {
+    type CenterType = ExtData;
+    type FileType = File;
+    type DirType = Dir;
+
+    fn file_open_ino(center: Rc<Self::CenterType>, ino: u32) -> Result<Self::FileType, Error> {
+        let meta = FileMeta::open_ino(center.fs.clone(), ino)?;
+        File::from_meta(center, meta)
+    }
+
+    fn file_rename(
+        file: &mut Self::FileType,
+        parent: &Self::DirType,
+        name: [u8; 16],
+    ) -> Result<(), Error> {
+        file.meta.rename(&parent.meta, name)
+    }
+
+    fn file_get_parent_ino(file: &Self::FileType) -> u32 {
+        file.meta.get_parent_ino()
+    }
+
+    fn file_get_ino(file: &Self::FileType) -> u32 {
+        file.meta.get_ino()
+    }
+
+    fn read(file: &Self::FileType, pos: usize, buf: &mut [u8]) -> Result<(), Error> {
+        file.data.partition().read(pos, buf)
+    }
+
+    fn write(file: &Self::FileType, pos: usize, buf: &[u8]) -> Result<(), Error> {
+        file.data.partition().write(pos, buf)
+    }
+
+    fn len(file: &Self::FileType) -> usize {
+        file.data.partition().len()
+    }
+
+    fn open_root(center: Rc<Self::CenterType>) -> Result<Self::DirType, Error> {
         let meta = DirMeta::open_root(center.fs.clone())?;
         Ok(Dir { center, meta })
     }
 
-    pub fn open_ino(center: Rc<ExtData>, ino: u32) -> Result<Dir, Error> {
+    fn dir_open_ino(center: Rc<Self::CenterType>, ino: u32) -> Result<Self::DirType, Error> {
         let meta = DirMeta::open_ino(center.fs.clone(), ino)?;
         Ok(Dir { center, meta })
     }
 
-    pub fn rename(&mut self, parent: &Dir, name: [u8; 16]) -> Result<(), Error> {
-        if parent.open_sub_file(name).is_ok() || parent.open_sub_dir(name).is_ok() {
+    fn dir_rename(
+        dir: &mut Self::DirType,
+        parent: &Self::DirType,
+        name: [u8; 16],
+    ) -> Result<(), Error> {
+        if Self::open_sub_file(&parent, name).is_ok() || Self::open_sub_dir(&parent, name).is_ok() {
             return make_error(Error::AlreadyExist);
         }
-        self.meta.rename(&parent.meta, name)
+        dir.meta.rename(&parent.meta, name)
     }
 
-    pub fn get_parent_ino(&self) -> u32 {
-        self.meta.get_parent_ino()
+    fn dir_get_parent_ino(dir: &Self::DirType) -> u32 {
+        dir.meta.get_parent_ino()
     }
 
-    pub fn get_ino(&self) -> u32 {
-        self.meta.get_ino()
+    fn dir_get_ino(dir: &Self::DirType) -> u32 {
+        dir.meta.get_ino()
     }
 
-    pub fn open_sub_dir(&self, name: [u8; 16]) -> Result<Dir, Error> {
+    fn open_sub_dir(dir: &Self::DirType, name: [u8; 16]) -> Result<Self::DirType, Error> {
         Ok(Dir {
-            center: self.center.clone(),
-            meta: self.meta.open_sub_dir(name)?,
+            center: dir.center.clone(),
+            meta: dir.meta.open_sub_dir(name)?,
         })
     }
 
-    pub fn open_sub_file(&self, name: [u8; 16]) -> Result<File, Error> {
-        File::from_meta(self.center.clone(), self.meta.open_sub_file(name)?)
+    fn open_sub_file(dir: &Self::DirType, name: [u8; 16]) -> Result<Self::FileType, Error> {
+        File::from_meta(dir.center.clone(), dir.meta.open_sub_file(name)?)
     }
 
-    pub fn list_sub_dir(&self) -> Result<Vec<([u8; 16], u32)>, Error> {
-        self.meta.list_sub_dir()
+    fn list_sub_dir(dir: &Self::DirType) -> Result<Vec<([u8; 16], u32)>, Error> {
+        dir.meta.list_sub_dir()
     }
 
-    pub fn list_sub_file(&self) -> Result<Vec<([u8; 16], u32)>, Error> {
-        self.meta.list_sub_file()
+    fn list_sub_file(dir: &Self::DirType) -> Result<Vec<([u8; 16], u32)>, Error> {
+        dir.meta.list_sub_file()
     }
 
-    pub fn new_sub_dir(&self, name: [u8; 16]) -> Result<Dir, Error> {
-        if self.open_sub_file(name).is_ok() || self.open_sub_dir(name).is_ok() {
+    fn new_sub_dir(dir: &Self::DirType, name: [u8; 16]) -> Result<Self::DirType, Error> {
+        if Self::open_sub_file(dir, name).is_ok() || Self::open_sub_dir(dir, name).is_ok() {
             return make_error(Error::AlreadyExist);
         }
         let dir_info = SaveExtDir {
@@ -236,13 +291,17 @@ impl Dir {
             padding: 0,
         };
         Ok(Dir {
-            center: self.center.clone(),
-            meta: self.meta.new_sub_dir(name, dir_info)?,
+            center: dir.center.clone(),
+            meta: dir.meta.new_sub_dir(name, dir_info)?,
         })
     }
 
-    pub fn delete(self) -> Result<(), Error> {
-        self.meta.delete()
+    fn dir_delete(dir: Self::DirType) -> Result<(), Error> {
+        dir.meta.delete()
+    }
+
+    fn commit(center: &Self::CenterType) -> Result<(), Error> {
+        center.meta_file.commit()
     }
 }
 

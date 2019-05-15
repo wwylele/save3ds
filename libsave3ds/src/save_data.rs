@@ -180,10 +180,6 @@ impl SaveData {
             block_len: fs_info.block_len as usize,
         }))
     }
-
-    pub fn commit(&self) -> Result<(), Error> {
-        self.disa.commit()
-    }
 }
 
 pub struct File {
@@ -413,7 +409,7 @@ impl FileSystem for SaveDataFileSystem {
     }
 
     fn commit(center: &Self::CenterType) -> Result<(), Error> {
-        center.commit()
+        center.disa.commit()
     }
 }
 
