@@ -473,7 +473,7 @@ impl<
 
 #[cfg(test)]
 mod test {
-    use crate::fs::*;
+    use crate::fs_meta::*;
     use crate::memory_file::MemoryFile;
     use rand::prelude::*;
     use std::collections::HashSet;

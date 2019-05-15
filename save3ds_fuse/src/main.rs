@@ -3,22 +3,23 @@ use getopts::Options;
 use libc::{EBADF, EEXIST, EIO, EISDIR, ENAMETOOLONG, ENOENT, ENOSPC, ENOTDIR, ENOTEMPTY, EROFS};
 use libsave3ds::error::*;
 use libsave3ds::save_data::*;
+use libsave3ds::save_ext_common;
 use libsave3ds::Resource;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::rc::Rc;
 use time;
 
-struct SaveDataFilesystem {
-    save: Rc<SaveData>,
-    fh_map: HashMap<u64, File>,
+struct SaveExtFilesystem<T: save_ext_common::FileSystem> {
+    save: Rc<T::CenterType>,
+    fh_map: HashMap<u64, T::FileType>,
     next_fh: u64,
     read_only: bool,
 }
 
-impl SaveDataFilesystem {
-    fn new(save: Rc<SaveData>, read_only: bool) -> SaveDataFilesystem {
-        SaveDataFilesystem {
+impl<T: save_ext_common::FileSystem> SaveExtFilesystem<T> {
+    fn new(save: Rc<T::CenterType>, read_only: bool) -> SaveExtFilesystem<T> {
+        SaveExtFilesystem::<T> {
             save,
             fh_map: HashMap::new(),
             next_fh: 1,
@@ -148,16 +149,16 @@ impl Ino {
     }
 }
 
-impl Drop for SaveDataFilesystem {
+impl<T: save_ext_common::FileSystem> Drop for SaveExtFilesystem<T> {
     fn drop(&mut self) {
         if !self.read_only {
-            self.save.commit().unwrap();
+            T::commit(self.save.as_ref()).unwrap();
             println!("Saved");
         }
     }
 }
 
-impl Filesystem for SaveDataFilesystem {
+impl<T: save_ext_common::FileSystem> Filesystem for SaveExtFilesystem<T> {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         let name_converted = if let Some(n) = name_os_to_3ds(name) {
             n
@@ -171,15 +172,15 @@ impl Filesystem for SaveDataFilesystem {
                 reply.error(ENOTDIR);
             }
             Ino::Dir(ino) => {
-                let parent_dir = if let Ok(parent_dir) = Dir::open_ino(self.save.clone(), ino) {
+                let parent_dir = if let Ok(parent_dir) = T::dir_open_ino(self.save.clone(), ino) {
                     parent_dir
                 } else {
                     reply.error(EIO);
                     return;
                 };
 
-                if let Ok(child) = parent_dir.open_sub_dir(name_converted) {
-                    let children_len = if let Ok(chidren) = child.list_sub_dir() {
+                if let Ok(child) = T::open_sub_dir(&parent_dir, name_converted) {
+                    let children_len = if let Ok(chidren) = T::list_sub_dir(&child) {
                         chidren.len()
                     } else {
                         reply.error(EIO);
@@ -188,15 +189,18 @@ impl Filesystem for SaveDataFilesystem {
 
                     reply.entry(
                         &time::Timespec::new(1, 0),
-                        &self.make_dir_attr(Ino::Dir(child.get_ino()).to_os(), children_len),
+                        &self.make_dir_attr(Ino::Dir(T::dir_get_ino(&child)).to_os(), children_len),
                         0,
                     );
                     return;
                 }
-                if let Ok(child) = parent_dir.open_sub_file(name_converted) {
+                if let Ok(child) = T::open_sub_file(&parent_dir, name_converted) {
                     reply.entry(
                         &time::Timespec::new(1, 0),
-                        &self.make_file_attr(Ino::File(child.get_ino()).to_os(), child.len()),
+                        &self.make_file_attr(
+                            Ino::File(T::file_get_ino(&child)).to_os(),
+                            T::len(&child),
+                        ),
                         0,
                     );
                     return;
@@ -209,18 +213,21 @@ impl Filesystem for SaveDataFilesystem {
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
         match Ino::from_os(ino) {
             Ino::File(ino) => {
-                if let Ok(file) = File::open_ino(self.save.clone(), ino) {
+                if let Ok(file) = T::file_open_ino(self.save.clone(), ino) {
                     reply.attr(
                         &time::Timespec::new(1, 0),
-                        &self.make_file_attr(Ino::File(file.get_ino()).to_os(), file.len()),
+                        &self.make_file_attr(
+                            Ino::File(T::file_get_ino(&file)).to_os(),
+                            T::len(&file),
+                        ),
                     );
                 } else {
                     reply.error(ENOENT);
                 }
             }
             Ino::Dir(ino) => {
-                if let Ok(dir) = Dir::open_ino(self.save.clone(), ino) {
-                    let children_len = if let Ok(chidren) = dir.list_sub_dir() {
+                if let Ok(dir) = T::dir_open_ino(self.save.clone(), ino) {
+                    let children_len = if let Ok(chidren) = T::list_sub_dir(&dir) {
                         chidren.len()
                     } else {
                         reply.error(EIO);
@@ -228,7 +235,7 @@ impl Filesystem for SaveDataFilesystem {
                     };
                     reply.attr(
                         &time::Timespec::new(1, 0),
-                        &self.make_dir_attr(Ino::Dir(dir.get_ino()).to_os(), children_len),
+                        &self.make_dir_attr(Ino::Dir(T::dir_get_ino(&dir)).to_os(), children_len),
                     );
                 } else {
                     reply.error(ENOENT);
@@ -253,16 +260,16 @@ impl Filesystem for SaveDataFilesystem {
                 reply.error(ENOTDIR);
             }
             Ino::Dir(ino) => {
-                let parent_dir = if let Ok(parent_dir) = Dir::open_ino(self.save.clone(), ino) {
+                let parent_dir = if let Ok(parent_dir) = T::dir_open_ino(self.save.clone(), ino) {
                     parent_dir
                 } else {
                     reply.error(EIO);
                     return;
                 };
-                match parent_dir.new_sub_dir(name_converted) {
+                match T::new_sub_dir(&parent_dir, name_converted) {
                     Ok(child) => reply.entry(
                         &time::Timespec::new(1, 0),
-                        &self.make_dir_attr(Ino::Dir(child.get_ino()).to_os(), 0),
+                        &self.make_dir_attr(Ino::Dir(T::dir_get_ino(&child)).to_os(), 0),
                         0,
                     ),
                     Err(Error::AlreadyExist) => reply.error(EEXIST),
@@ -298,17 +305,17 @@ impl Filesystem for SaveDataFilesystem {
                 reply.error(ENOTDIR);
             }
             Ino::Dir(ino) => {
-                let parent_dir = if let Ok(parent_dir) = Dir::open_ino(self.save.clone(), ino) {
+                let parent_dir = if let Ok(parent_dir) = T::dir_open_ino(self.save.clone(), ino) {
                     parent_dir
                 } else {
                     reply.error(EIO);
                     return;
                 };
 
-                match parent_dir.new_sub_file(name_converted, 0) {
+                match T::new_sub_file(&parent_dir, name_converted, 0) {
                     Ok(child) => reply.entry(
                         &time::Timespec::new(1, 0),
-                        &self.make_file_attr(Ino::File(child.get_ino()).to_os(), 0),
+                        &self.make_file_attr(Ino::File(T::file_get_ino(&child)).to_os(), 0),
                         0,
                     ),
                     Err(Error::AlreadyExist) => reply.error(EEXIST),
@@ -337,15 +344,15 @@ impl Filesystem for SaveDataFilesystem {
                 reply.error(ENOTDIR);
             }
             Ino::Dir(ino) => {
-                let parent_dir = if let Ok(parent_dir) = Dir::open_ino(self.save.clone(), ino) {
+                let parent_dir = if let Ok(parent_dir) = T::dir_open_ino(self.save.clone(), ino) {
                     parent_dir
                 } else {
                     reply.error(EIO);
                     return;
                 };
 
-                if let Ok(child) = parent_dir.open_sub_dir(name_converted) {
-                    match child.delete() {
+                if let Ok(child) = T::open_sub_dir(&parent_dir, name_converted) {
+                    match T::dir_delete(child) {
                         Ok(()) => reply.ok(),
                         Err(Error::NotEmpty) => reply.error(ENOTEMPTY),
                         Err(_) => reply.error(EIO),
@@ -374,15 +381,15 @@ impl Filesystem for SaveDataFilesystem {
                 reply.error(ENOTDIR);
             }
             Ino::Dir(ino) => {
-                let parent_dir = if let Ok(parent_dir) = Dir::open_ino(self.save.clone(), ino) {
+                let parent_dir = if let Ok(parent_dir) = T::dir_open_ino(self.save.clone(), ino) {
                     parent_dir
                 } else {
                     reply.error(EIO);
                     return;
                 };
 
-                if let Ok(child) = parent_dir.open_sub_file(name_converted) {
-                    match child.delete() {
+                if let Ok(child) = T::open_sub_file(&parent_dir, name_converted) {
+                    match T::file_delete(child) {
                         Ok(()) => reply.ok(),
                         Err(_) => reply.error(EIO),
                     }
@@ -396,7 +403,7 @@ impl Filesystem for SaveDataFilesystem {
     fn open(&mut self, _req: &Request, ino: u64, _flags: u32, reply: ReplyOpen) {
         match Ino::from_os(ino) {
             Ino::File(ino) => {
-                if let Ok(file) = File::open_ino(self.save.clone(), ino) {
+                if let Ok(file) = T::file_open_ino(self.save.clone(), ino) {
                     self.fh_map.insert(self.next_fh, file);
                     reply.opened(self.next_fh, 0);
                     self.next_fh += 1;
@@ -440,13 +447,13 @@ impl Filesystem for SaveDataFilesystem {
                 reply.data(&[]);
                 return;
             }
-            let end = std::cmp::min(offset + size, file.len());
+            let end = std::cmp::min(offset + size, T::len(&file));
             if end <= offset {
                 reply.data(&[]);
                 return;
             }
             let mut buf = vec![0; end - offset];
-            match file.read(offset, &mut buf) {
+            match T::read(&file, offset, &mut buf) {
                 Ok(()) | Err(Error::HashMismatch) => reply.data(&buf),
                 _ => reply.error(EIO),
             }
@@ -472,13 +479,13 @@ impl Filesystem for SaveDataFilesystem {
 
         let offset = offset as usize;
         let end = offset + data.len();
-        if let Some(file) = self.fh_map.get_mut(&fh) {
+        if let Some(mut file) = self.fh_map.get_mut(&fh) {
             if data.is_empty() {
                 reply.written(0);
                 return;
             }
-            if end > file.len() {
-                match file.resize(end) {
+            if end > T::len(&file) {
+                match T::resize(&mut file, end) {
                     Ok(()) => (),
                     Err(Error::NoSpace) => {
                         reply.error(ENOSPC);
@@ -489,7 +496,7 @@ impl Filesystem for SaveDataFilesystem {
                         return;
                     }
                 }
-                match file.write(offset, &data) {
+                match T::write(&file, offset, &data) {
                     Ok(()) => reply.written(data.len() as u32),
                     _ => reply.error(EIO),
                 }
@@ -510,8 +517,12 @@ impl Filesystem for SaveDataFilesystem {
         match Ino::from_os(ino) {
             Ino::File(_) => reply.error(ENOTDIR),
             Ino::Dir(ino) => {
-                if let Ok(dir) = Dir::open_ino(self.save.clone(), ino) {
-                    let parent_ino = if ino == 1 { 1 } else { dir.get_parent_ino() };
+                if let Ok(dir) = T::dir_open_ino(self.save.clone(), ino) {
+                    let parent_ino = if ino == 1 {
+                        1
+                    } else {
+                        T::dir_get_parent_ino(&dir)
+                    };
                     let mut entries = vec![
                         (Ino::Dir(ino).to_os(), FileType::Directory, ".".to_owned()),
                         (
@@ -521,7 +532,7 @@ impl Filesystem for SaveDataFilesystem {
                         ),
                     ];
 
-                    let sub_dirs = if let Ok(r) = dir.list_sub_dir() {
+                    let sub_dirs = if let Ok(r) = T::list_sub_dir(&dir) {
                         r
                     } else {
                         reply.error(EIO);
@@ -535,7 +546,7 @@ impl Filesystem for SaveDataFilesystem {
                         ));
                     }
 
-                    let sub_files = if let Ok(r) = dir.list_sub_file() {
+                    let sub_files = if let Ok(r) = T::list_sub_file(&dir) {
                         r
                     } else {
                         reply.error(EIO);
@@ -593,7 +604,7 @@ impl Filesystem for SaveDataFilesystem {
                 reply.error(ENOTDIR);
                 return;
             }
-            Ino::Dir(ino) => match Dir::open_ino(self.save.clone(), ino) {
+            Ino::Dir(ino) => match T::dir_open_ino(self.save.clone(), ino) {
                 Ok(dir) => dir,
                 Err(_) => {
                     reply.error(EIO);
@@ -607,7 +618,7 @@ impl Filesystem for SaveDataFilesystem {
                 reply.error(ENOTDIR);
                 return;
             }
-            Ino::Dir(ino) => match Dir::open_ino(self.save.clone(), ino) {
+            Ino::Dir(ino) => match T::dir_open_ino(self.save.clone(), ino) {
                 Ok(dir) => dir,
                 Err(_) => {
                     reply.error(EIO);
@@ -616,9 +627,9 @@ impl Filesystem for SaveDataFilesystem {
             },
         };
 
-        if let Ok(mut file) = dir.open_sub_file(name_converted) {
-            if let Ok(old_file) = newdir.open_sub_file(newname_converted) {
-                match old_file.delete() {
+        if let Ok(mut file) = T::open_sub_file(&dir, name_converted) {
+            if let Ok(old_file) = T::open_sub_file(&newdir, newname_converted) {
+                match T::file_delete(old_file) {
                     Ok(()) => (),
                     Err(_) => {
                         reply.error(EIO);
@@ -627,14 +638,14 @@ impl Filesystem for SaveDataFilesystem {
                 }
             }
 
-            match file.rename(&newdir, newname_converted) {
+            match T::file_rename(&mut file, &newdir, newname_converted) {
                 Ok(()) => reply.ok(),
                 Err(Error::AlreadyExist) => reply.error(EEXIST),
                 Err(_) => reply.error(EIO),
             }
-        } else if let Ok(mut dir) = dir.open_sub_dir(name_converted) {
-            if let Ok(old_dir) = newdir.open_sub_dir(newname_converted) {
-                match old_dir.delete() {
+        } else if let Ok(mut dir) = T::open_sub_dir(&dir, name_converted) {
+            if let Ok(old_dir) = T::open_sub_dir(&newdir, newname_converted) {
+                match T::dir_delete(old_dir) {
                     Ok(()) => (),
                     Err(Error::NotEmpty) => {
                         reply.error(ENOTEMPTY);
@@ -647,7 +658,7 @@ impl Filesystem for SaveDataFilesystem {
                 }
             }
 
-            match dir.rename(&newdir, newname_converted) {
+            match T::dir_rename(&mut dir, &newdir, newname_converted) {
                 Ok(()) => reply.ok(),
                 Err(Error::AlreadyExist) => reply.error(EEXIST),
                 Err(_) => reply.error(EIO),
@@ -733,7 +744,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
         panic!()
     };
 
-    let fs = SaveDataFilesystem::new(save, matches.opt_present("r"));
+    let fs = SaveExtFilesystem::<SaveDataFileSystem>::new(save, matches.opt_present("r"));
     let options = [];
     let mountpoint = std::path::Path::new(&matches.free[0]);
 

@@ -19,6 +19,7 @@ pub enum Error {
     NoSd,
     NoMovable,
     NotEmpty,
+    Unsupported,
 }
 
 impl fmt::Display for Error {

@@ -1,7 +1,7 @@
 use crate::disa::Disa;
 use crate::error::*;
 use crate::fat::*;
-use crate::fs::{self, FileInfo};
+use crate::fs_meta::{self, FileInfo};
 use crate::memory_file::MemoryFile;
 use crate::random_access_file::*;
 use crate::save_ext_common::*;
@@ -29,9 +29,9 @@ impl FileInfo for SaveFile {
     }
 }
 
-type FsMeta = fs::FsMeta<SaveExtKey, SaveExtDir, SaveExtKey, SaveFile>;
-type DirMeta = fs::DirMeta<SaveExtKey, SaveExtDir, SaveExtKey, SaveFile>;
-type FileMeta = fs::FileMeta<SaveExtKey, SaveExtDir, SaveExtKey, SaveFile>;
+type FsMeta = fs_meta::FsMeta<SaveExtKey, SaveExtDir, SaveExtKey, SaveFile>;
+type DirMeta = fs_meta::DirMeta<SaveExtKey, SaveExtDir, SaveExtKey, SaveFile>;
+type FileMeta = fs_meta::FileMeta<SaveExtKey, SaveExtDir, SaveExtKey, SaveFile>;
 
 pub struct NandSaveSigner {
     pub id: u32,
@@ -402,6 +402,113 @@ impl Dir {
 
     pub fn delete(self) -> Result<(), Error> {
         self.meta.delete()
+    }
+}
+
+pub struct SaveDataFileSystem {}
+impl FileSystem for SaveDataFileSystem {
+    type CenterType = SaveData;
+    type FileType = File;
+    type DirType = Dir;
+
+    fn file_open_ino(center: Rc<Self::CenterType>, ino: u32) -> Result<Self::FileType, Error> {
+        File::open_ino(center, ino)
+    }
+
+    fn file_rename(
+        file: &mut Self::FileType,
+        parent: &Self::DirType,
+        name: [u8; 16],
+    ) -> Result<(), Error> {
+        file.rename(parent, name)
+    }
+
+    fn file_get_parent_ino(file: &Self::FileType) -> u32 {
+        file.get_parent_ino()
+    }
+
+    fn file_get_ino(file: &Self::FileType) -> u32 {
+        file.get_ino()
+    }
+
+    fn file_delete(file: Self::FileType) -> Result<(), Error> {
+        file.delete()
+    }
+
+    fn resize(file: &mut Self::FileType, len: usize) -> Result<(), Error> {
+        file.resize(len)
+    }
+
+    fn read(file: &Self::FileType, pos: usize, buf: &mut [u8]) -> Result<(), Error> {
+        file.read(pos, buf)
+    }
+
+    fn write(file: &Self::FileType, pos: usize, buf: &[u8]) -> Result<(), Error> {
+        file.write(pos, buf)
+    }
+
+    fn len(file: &Self::FileType) -> usize {
+        file.len()
+    }
+
+    fn open_root(center: Rc<Self::CenterType>) -> Result<Self::DirType, Error> {
+        Dir::open_root(center)
+    }
+
+    fn dir_open_ino(center: Rc<Self::CenterType>, ino: u32) -> Result<Self::DirType, Error> {
+        Dir::open_ino(center, ino)
+    }
+
+    fn dir_rename(
+        dir: &mut Self::DirType,
+        parent: &Self::DirType,
+        name: [u8; 16],
+    ) -> Result<(), Error> {
+        dir.rename(parent, name)
+    }
+
+    fn dir_get_parent_ino(dir: &Self::DirType) -> u32 {
+        dir.get_parent_ino()
+    }
+
+    fn dir_get_ino(dir: &Self::DirType) -> u32 {
+        dir.get_ino()
+    }
+
+    fn open_sub_dir(dir: &Self::DirType, name: [u8; 16]) -> Result<Self::DirType, Error> {
+        dir.open_sub_dir(name)
+    }
+
+    fn open_sub_file(dir: &Self::DirType, name: [u8; 16]) -> Result<Self::FileType, Error> {
+        dir.open_sub_file(name)
+    }
+
+    fn list_sub_dir(dir: &Self::DirType) -> Result<Vec<([u8; 16], u32)>, Error> {
+        dir.list_sub_dir()
+    }
+
+    fn list_sub_file(dir: &Self::DirType) -> Result<Vec<([u8; 16], u32)>, Error> {
+        dir.list_sub_file()
+    }
+
+    fn new_sub_dir(dir: &Self::DirType, name: [u8; 16]) -> Result<Self::DirType, Error> {
+        dir.new_sub_dir(name)
+    }
+
+    fn new_sub_file(
+        dir: &Self::DirType,
+        name: [u8; 16],
+        len: usize,
+    ) -> Result<Self::FileType, Error> {
+        dir.new_sub_file(name, len)
+    }
+
+    fn dir_delete(dir: Self::DirType) -> Result<(), Error> {
+        dir.delete()
+    }
+
+    fn commit(center: &Self::CenterType) -> Result<(), Error> {
+        center.commit()
     }
 }
 

@@ -1,7 +1,7 @@
 use crate::diff::Diff;
 use crate::error::*;
 use crate::fat::*;
-use crate::fs::{self, FileInfo};
+use crate::fs_meta::{self, FileInfo};
 use crate::memory_file::MemoryFile;
 use crate::random_access_file::*;
 use crate::save_ext_common::*;
@@ -30,9 +30,9 @@ impl FileInfo for ExtFile {
     }
 }
 
-type FsMeta = fs::FsMeta<SaveExtKey, SaveExtDir, SaveExtKey, ExtFile>;
-type DirMeta = fs::DirMeta<SaveExtKey, SaveExtDir, SaveExtKey, ExtFile>;
-type FileMeta = fs::FileMeta<SaveExtKey, SaveExtDir, SaveExtKey, ExtFile>;
+type FsMeta = fs_meta::FsMeta<SaveExtKey, SaveExtDir, SaveExtKey, ExtFile>;
+type DirMeta = fs_meta::DirMeta<SaveExtKey, SaveExtDir, SaveExtKey, ExtFile>;
+type FileMeta = fs_meta::FileMeta<SaveExtKey, SaveExtDir, SaveExtKey, ExtFile>;
 
 #[derive(ByteStruct)]
 #[byte_struct_le]
