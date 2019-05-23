@@ -1,11 +1,9 @@
-use crate::error::*;
 use crate::fs_meta::*;
 use byte_struct::*;
-use std::rc::Rc;
 
 #[derive(ByteStruct, Clone)]
 #[byte_struct_le]
-pub(crate) struct SaveExtDir {
+pub struct SaveExtDir {
     pub next: u32,
     pub sub_dir: u32,
     pub sub_file: u32,
@@ -14,7 +12,7 @@ pub(crate) struct SaveExtDir {
 
 #[derive(ByteStruct, Clone, PartialEq)]
 #[byte_struct_le]
-pub(crate) struct SaveExtKey {
+pub struct SaveExtKey {
     parent: u32,
     name: [u8; 16],
 }
@@ -50,132 +48,6 @@ impl ParentedKey for SaveExtKey {
     }
     fn new(parent: u32, name: [u8; 16]) -> SaveExtKey {
         SaveExtKey { parent, name }
-    }
-}
-
-#[derive(ByteStruct)]
-#[byte_struct_le]
-pub(crate) struct FsInfo {
-    pub unknown: u32,
-    pub block_len: u32,
-    pub dir_hash_offset: u64,
-    pub dir_buckets: u32,
-    pub p0: u32,
-    pub file_hash_offset: u64,
-    pub file_buckets: u32,
-    pub p1: u32,
-    pub fat_offset: u64,
-    pub fat_size: u32,
-    pub p2: u32,
-    pub data_offset: u64,
-    pub data_block_count: u32,
-    pub p3: u32,
-    pub dir_table: u64,
-    pub max_dir: u32,
-    pub p4: u32,
-    pub file_table: u64,
-    pub max_file: u32,
-    pub p5: u32,
-}
-
-#[allow(unused_variables)]
-pub trait FileSystem {
-    type CenterType;
-    type FileType;
-    type DirType;
-
-    fn file_open_ino(center: Rc<Self::CenterType>, ino: u32) -> Result<Self::FileType, Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn file_rename(
-        file: &mut Self::FileType,
-        parent: &Self::DirType,
-        name: [u8; 16],
-    ) -> Result<(), Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn file_get_parent_ino(file: &Self::FileType) -> u32;
-
-    fn file_get_ino(file: &Self::FileType) -> u32;
-
-    fn file_delete(file: Self::FileType) -> Result<(), Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn resize(file: &mut Self::FileType, len: usize) -> Result<(), Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn read(file: &Self::FileType, pos: usize, buf: &mut [u8]) -> Result<(), Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn write(file: &Self::FileType, pos: usize, buf: &[u8]) -> Result<(), Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn len(file: &Self::FileType) -> usize;
-
-    fn is_empty(file: &Self::FileType) -> bool {
-        Self::len(file) == 0
-    }
-
-    fn open_root(center: Rc<Self::CenterType>) -> Result<Self::DirType, Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn dir_open_ino(center: Rc<Self::CenterType>, ino: u32) -> Result<Self::DirType, Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn dir_rename(
-        dir: &mut Self::DirType,
-        parent: &Self::DirType,
-        name: [u8; 16],
-    ) -> Result<(), Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn dir_get_parent_ino(dir: &Self::DirType) -> u32;
-
-    fn dir_get_ino(dir: &Self::DirType) -> u32;
-
-    fn open_sub_dir(dir: &Self::DirType, name: [u8; 16]) -> Result<Self::DirType, Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn open_sub_file(dir: &Self::DirType, name: [u8; 16]) -> Result<Self::FileType, Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn list_sub_dir(dir: &Self::DirType) -> Result<Vec<([u8; 16], u32)>, Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn list_sub_file(dir: &Self::DirType) -> Result<Vec<([u8; 16], u32)>, Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn new_sub_dir(dir: &Self::DirType, name: [u8; 16]) -> Result<Self::DirType, Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn new_sub_file(
-        dir: &Self::DirType,
-        name: [u8; 16],
-        len: usize,
-    ) -> Result<Self::FileType, Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn dir_delete(dir: Self::DirType) -> Result<(), Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn commit(center: &Self::CenterType) -> Result<(), Error> {
-        make_error(Error::Unsupported)
     }
 }
 

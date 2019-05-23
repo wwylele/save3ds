@@ -1,27 +1,53 @@
-use crate::disa::Disa;
+use crate::diff::Diff;
 use crate::error::*;
 use crate::fat::*;
 use crate::file_system::*;
-use crate::fs_meta::{self, FileInfo, FsInfo};
-use crate::memory_file::MemoryFile;
+use crate::fs_meta::{self, DirInfo, FileInfo, FsInfo, ParentedKey};
 use crate::random_access_file::*;
-use crate::save_ext_common::*;
 use crate::signed_file::*;
 use crate::sub_file::SubFile;
 use byte_struct::*;
 use std::rc::Rc;
 
-#[derive(ByteStruct, Clone)]
+#[derive(ByteStruct, Clone, PartialEq)]
 #[byte_struct_le]
-pub struct SaveFile {
-    pub next: u32,
-    pub padding1: u32,
-    pub block: u32,
-    pub size: u64,
-    pub padding2: u32,
+struct DbDirKey {
+    parent: u32,
 }
 
-impl FileInfo for SaveFile {
+impl ParentedKey for DbDirKey {
+    type NameType = ();
+    fn get_name(&self) {}
+    fn get_parent(&self) -> u32 {
+        self.parent
+    }
+    fn new(parent: u32, _name: ()) -> DbDirKey {
+        DbDirKey { parent }
+    }
+}
+
+#[derive(ByteStruct, Clone)]
+#[byte_struct_le]
+struct DbDir {
+    next: u32,
+    sub_dir: u32,
+    sub_file: u32,
+    padding: [u8; 12],
+}
+
+impl DirInfo for DbDir {
+    fn set_sub_dir(&mut self, index: u32) {
+        self.sub_dir = index;
+    }
+    fn get_sub_dir(&self) -> u32 {
+        self.sub_dir
+    }
+    fn set_sub_file(&mut self, index: u32) {
+        self.sub_file = index;
+    }
+    fn get_sub_file(&self) -> u32 {
+        self.sub_file
+    }
     fn set_next(&mut self, index: u32) {
         self.next = index;
     }
@@ -30,49 +56,52 @@ impl FileInfo for SaveFile {
     }
 }
 
-type FsMeta = fs_meta::FsMeta<SaveExtKey, SaveExtDir, SaveExtKey, SaveFile>;
-type DirMeta = fs_meta::DirMeta<SaveExtKey, SaveExtDir, SaveExtKey, SaveFile>;
-type FileMeta = fs_meta::FileMeta<SaveExtKey, SaveExtDir, SaveExtKey, SaveFile>;
-
-pub struct NandSaveSigner {
-    pub id: u32,
+#[derive(ByteStruct, Clone, PartialEq)]
+#[byte_struct_le]
+pub(crate) struct DbFileKey {
+    parent: u32,
+    name: u64,
 }
 
-impl Signer for NandSaveSigner {
-    fn block(&self, mut data: Vec<u8>) -> Vec<u8> {
-        let mut result = Vec::from(&b"CTR-SYS0"[..]);
-        result.extend(&self.id.to_le_bytes());
-        result.extend(&[0; 4]);
-        result.append(&mut data);
-        result
+impl ParentedKey for DbFileKey {
+    type NameType = u64;
+    fn get_name(&self) -> u64 {
+        self.name
+    }
+    fn get_parent(&self) -> u32 {
+        self.parent
+    }
+    fn new(parent: u32, name: u64) -> DbFileKey {
+        DbFileKey { parent, name }
     }
 }
 
-pub struct CtrSav0Signer {}
+#[derive(ByteStruct, Clone)]
+#[byte_struct_le]
+struct DbFile {
+    next: u32,
+    padding1: u32,
+    block: u32,
+    size: u64,
+    padding2: u64,
+}
 
-impl Signer for CtrSav0Signer {
-    fn block(&self, mut data: Vec<u8>) -> Vec<u8> {
-        let mut result = Vec::from(&b"CTR-SAV0"[..]);
-        result.append(&mut data);
-        result
+impl FileInfo for DbFile {
+    fn set_next(&mut self, index: u32) {
+        self.next = index;
+    }
+    fn get_next(&self) -> u32 {
+        self.next
     }
 }
 
-pub struct SdSaveSigner {
-    pub id: u64,
-}
-impl Signer for SdSaveSigner {
-    fn block(&self, data: Vec<u8>) -> Vec<u8> {
-        let mut result = Vec::from(&b"CTR-SIGN"[..]);
-        result.extend(&self.id.to_le_bytes());
-        result.append(&mut CtrSav0Signer {}.hash(data));
-        result
-    }
-}
+type FsMeta = fs_meta::FsMeta<DbDirKey, DbDir, DbFileKey, DbFile>;
+type DirMeta = fs_meta::DirMeta<DbDirKey, DbDir, DbFileKey, DbFile>;
+type FileMeta = fs_meta::FileMeta<DbDirKey, DbDir, DbFileKey, DbFile>;
 
 #[derive(ByteStruct)]
 #[byte_struct_le]
-struct SaveHeader {
+struct DbHeader {
     magic: [u8; 4],
     version: u32,
     fs_info_offset: u64,
@@ -81,101 +110,126 @@ struct SaveHeader {
     padding: u32,
 }
 
-pub struct SaveData {
-    disa: Rc<Disa>,
+#[derive(PartialEq)]
+pub enum DbType {
+    Ticket,
+    NandTitle,
+    NandImport,
+    TmpTitle,
+    TmpImport,
+    SdTitle,
+    SdImport,
+}
+
+struct FakeSizeFile {
+    parent: Rc<RandomAccessFile>,
+    len: usize,
+}
+
+impl RandomAccessFile for FakeSizeFile {
+    fn read(&self, pos: usize, buf: &mut [u8]) -> Result<(), Error> {
+        if pos >= self.parent.len() {
+            return Ok(());
+        }
+        let end = std::cmp::min(pos + buf.len(), self.parent.len());
+        self.parent.read(pos, &mut buf[0..end - pos])
+    }
+    fn write(&self, pos: usize, buf: &[u8]) -> Result<(), Error> {
+        if pos >= self.parent.len() {
+            return Ok(());
+        }
+        let end = std::cmp::min(pos + buf.len(), self.parent.len());
+        self.parent.write(pos, &buf[0..end - pos])
+    }
+    fn len(&self) -> usize {
+        self.len
+    }
+    fn commit(&self) -> Result<(), Error> {
+        Ok(())
+    }
+}
+
+pub struct Db {
+    diff: Rc<Diff>,
     fat: Rc<Fat>,
     fs: Rc<FsMeta>,
     block_len: usize,
 }
 
-pub enum SaveDataType {
-    Nand([u8; 16], u32),
-    Sd([u8; 16], u64),
-    Bare,
-}
+impl Db {
+    pub fn new(file: Rc<RandomAccessFile>, db_type: DbType) -> Result<Rc<Db>, Error> {
+        let diff = Rc::new(Diff::new(file, None)?);
+        let pre_len = 0x80;
 
-impl SaveData {
-    pub fn from_vec(v: Vec<u8>, save_data_type: SaveDataType) -> Result<Rc<SaveData>, Error> {
-        let file = Rc::new(MemoryFile::new(v));
-        SaveData::new(file, save_data_type)
-    }
+        let without_pre = Rc::new(SubFile::new(
+            diff.partition().clone(),
+            pre_len,
+            diff.partition().len() - pre_len,
+        )?);
 
-    pub fn new(
-        file: Rc<RandomAccessFile>,
-        save_data_type: SaveDataType,
-    ) -> Result<Rc<SaveData>, Error> {
-        let signer: Option<(Box<Signer>, [u8; 16])> = match save_data_type {
-            SaveDataType::Bare => None,
-            SaveDataType::Nand(key, id) => Some((Box::new(NandSaveSigner { id }), key)),
-            SaveDataType::Sd(key, id) => Some((Box::new(SdSaveSigner { id }), key)),
-        };
-
-        let disa = Rc::new(Disa::new(file, signer)?);
-        let header: SaveHeader = read_struct(disa[0].as_ref(), 0)?;
-        if header.magic != *b"SAVE" || header.version != 0x40000 {
+        let header: DbHeader = read_struct(without_pre.as_ref(), 0)?;
+        if header.magic != *b"BDRI" || header.version != 0x30000 {
             return make_error(Error::MagicMismatch);
         }
-        let fs_info: FsInfo = read_struct(disa[0].as_ref(), header.fs_info_offset as usize)?;
+        let fs_info: FsInfo = read_struct(without_pre.as_ref(), header.fs_info_offset as usize)?;
         if fs_info.data_block_count != fs_info.fat_size {
             return make_error(Error::SizeMismatch);
         }
 
         let dir_hash = Rc::new(SubFile::new(
-            disa[0].clone(),
+            without_pre.clone(),
             fs_info.dir_hash_offset as usize,
             fs_info.dir_buckets as usize * 4,
         )?);
 
         let file_hash = Rc::new(SubFile::new(
-            disa[0].clone(),
+            without_pre.clone(),
             fs_info.file_hash_offset as usize,
             fs_info.file_buckets as usize * 4,
         )?);
 
         let fat_table = Rc::new(SubFile::new(
-            disa[0].clone(),
+            without_pre.clone(),
             fs_info.fat_offset as usize,
             (fs_info.fat_size + 1) as usize * 8,
         )?);
 
-        let data: Rc<RandomAccessFile> = if disa.partition_count() == 2 {
-            disa[1].clone()
+        let data_offset = fs_info.data_offset as usize;
+        let data_len = (fs_info.data_block_count * fs_info.block_len) as usize;
+        let data_end = data_len + data_offset;
+        let data_delta = if without_pre.len() < data_end {
+            data_end - without_pre.len()
         } else {
-            Rc::new(SubFile::new(
-                disa[0].clone(),
-                fs_info.data_offset as usize,
-                (fs_info.data_block_count * fs_info.block_len) as usize,
-            )?)
+            0
         };
+
+        println!("Database file end fixup: 0x{:x}", data_delta);
+
+        let data: Rc<RandomAccessFile> = Rc::new(FakeSizeFile {
+            parent: Rc::new(SubFile::new(
+                without_pre.clone(),
+                fs_info.data_offset as usize,
+                data_len - data_delta,
+            )?),
+            len: data_len,
+        });
 
         let fat = Fat::new(fat_table, data, fs_info.block_len as usize)?;
 
-        let dir_table: Rc<RandomAccessFile> = if disa.partition_count() == 2 {
-            Rc::new(SubFile::new(
-                disa[0].clone(),
-                fs_info.dir_table as usize,
-                (fs_info.max_dir + 2) as usize * (SaveExtKey::BYTE_LEN + SaveExtDir::BYTE_LEN + 4),
-            )?)
-        } else {
-            let block = (fs_info.dir_table & 0xFFFF_FFFF) as usize;
-            Rc::new(FatFile::open(fat.clone(), block)?)
-        };
+        let dir_table: Rc<RandomAccessFile> = Rc::new(FatFile::open(
+            fat.clone(),
+            (fs_info.dir_table & 0xFFFF_FFFF) as usize,
+        )?);
 
-        let file_table: Rc<RandomAccessFile> = if disa.partition_count() == 2 {
-            Rc::new(SubFile::new(
-                disa[0].clone(),
-                fs_info.file_table as usize,
-                (fs_info.max_file + 1) as usize * (SaveExtKey::BYTE_LEN + SaveFile::BYTE_LEN + 4),
-            )?)
-        } else {
-            let block = (fs_info.file_table & 0xFFFF_FFFF) as usize;
-            Rc::new(FatFile::open(fat.clone(), block)?)
-        };
+        let file_table: Rc<RandomAccessFile> = Rc::new(FatFile::open(
+            fat.clone(),
+            (fs_info.file_table & 0xFFFF_FFFF) as usize,
+        )?);
 
         let fs = FsMeta::new(dir_hash, dir_table, file_hash, file_table)?;
 
-        Ok(Rc::new(SaveData {
-            disa,
+        Ok(Rc::new(Db {
+            diff,
             fat,
             fs,
             block_len: fs_info.block_len as usize,
@@ -184,14 +238,14 @@ impl SaveData {
 }
 
 pub struct File {
-    center: Rc<SaveData>,
+    center: Rc<Db>,
     meta: FileMeta,
     data: Option<FatFile>,
     len: usize,
 }
 
 impl File {
-    fn from_meta(center: Rc<SaveData>, meta: FileMeta) -> Result<File, Error> {
+    fn from_meta(center: Rc<Db>, meta: FileMeta) -> Result<File, Error> {
         let info = meta.get_info()?;
         let len = info.size as usize;
         let data = if info.block == 0x8000_0000 {
@@ -216,16 +270,16 @@ impl File {
 }
 
 pub struct Dir {
-    center: Rc<SaveData>,
+    center: Rc<Db>,
     meta: DirMeta,
 }
 
-pub struct SaveDataFileSystem {}
-impl FileSystem for SaveDataFileSystem {
-    type CenterType = SaveData;
+pub struct DbFileSystem {}
+impl FileSystem for DbFileSystem {
+    type CenterType = Db;
     type FileType = File;
     type DirType = Dir;
-    type NameType = [u8; 16];
+    type NameType = u64;
 
     fn file_open_ino(center: Rc<Self::CenterType>, ino: u32) -> Result<Self::FileType, Error> {
         let meta = FileMeta::open_ino(center.fs.clone(), ino)?;
@@ -235,7 +289,7 @@ impl FileSystem for SaveDataFileSystem {
     fn file_rename(
         file: &mut Self::FileType,
         parent: &Self::DirType,
-        name: [u8; 16],
+        name: u64,
     ) -> Result<(), Error> {
         file.meta.rename(&parent.meta, name)
     }
@@ -317,17 +371,6 @@ impl FileSystem for SaveDataFileSystem {
         Ok(Dir { center, meta })
     }
 
-    fn dir_rename(
-        dir: &mut Self::DirType,
-        parent: &Self::DirType,
-        name: [u8; 16],
-    ) -> Result<(), Error> {
-        if Self::open_sub_file(&parent, name).is_ok() || Self::open_sub_dir(&parent, name).is_ok() {
-            return make_error(Error::AlreadyExist);
-        }
-        dir.meta.rename(&parent.meta, name)
-    }
-
     fn dir_get_parent_ino(dir: &Self::DirType) -> u32 {
         dir.meta.get_parent_ino()
     }
@@ -336,46 +379,19 @@ impl FileSystem for SaveDataFileSystem {
         dir.meta.get_ino()
     }
 
-    fn open_sub_dir(dir: &Self::DirType, name: [u8; 16]) -> Result<Self::DirType, Error> {
-        Ok(Dir {
-            center: dir.center.clone(),
-            meta: dir.meta.open_sub_dir(name)?,
-        })
-    }
-
-    fn open_sub_file(dir: &Self::DirType, name: [u8; 16]) -> Result<Self::FileType, Error> {
+    fn open_sub_file(dir: &Self::DirType, name: u64) -> Result<Self::FileType, Error> {
         File::from_meta(dir.center.clone(), dir.meta.open_sub_file(name)?)
     }
 
-    fn list_sub_dir(dir: &Self::DirType) -> Result<Vec<([u8; 16], u32)>, Error> {
-        dir.meta.list_sub_dir()
+    fn list_sub_dir(_dir: &Self::DirType) -> Result<Vec<(u64, u32)>, Error> {
+        Ok(vec![])
     }
 
-    fn list_sub_file(dir: &Self::DirType) -> Result<Vec<([u8; 16], u32)>, Error> {
+    fn list_sub_file(dir: &Self::DirType) -> Result<Vec<(u64, u32)>, Error> {
         dir.meta.list_sub_file()
     }
 
-    fn new_sub_dir(dir: &Self::DirType, name: [u8; 16]) -> Result<Self::DirType, Error> {
-        if Self::open_sub_file(dir, name).is_ok() || Self::open_sub_dir(dir, name).is_ok() {
-            return make_error(Error::AlreadyExist);
-        }
-        let dir_info = SaveExtDir {
-            next: 0,
-            sub_dir: 0,
-            sub_file: 0,
-            padding: 0,
-        };
-        Ok(Dir {
-            center: dir.center.clone(),
-            meta: dir.meta.new_sub_dir(name, dir_info)?,
-        })
-    }
-
-    fn new_sub_file(
-        dir: &Self::DirType,
-        name: [u8; 16],
-        len: usize,
-    ) -> Result<Self::FileType, Error> {
+    fn new_sub_file(dir: &Self::DirType, name: u64, len: usize) -> Result<Self::FileType, Error> {
         if Self::open_sub_file(dir, name).is_ok() || Self::open_sub_dir(dir, name).is_ok() {
             return make_error(Error::AlreadyExist);
         }
@@ -388,7 +404,7 @@ impl FileSystem for SaveDataFileSystem {
         };
         match dir.meta.new_sub_file(
             name,
-            SaveFile {
+            DbFile {
                 next: 0,
                 padding1: 0,
                 block: block,
@@ -406,22 +422,7 @@ impl FileSystem for SaveDataFileSystem {
         }
     }
 
-    fn dir_delete(dir: Self::DirType) -> Result<(), Error> {
-        dir.meta.delete()
-    }
-
     fn commit(center: &Self::CenterType) -> Result<(), Error> {
-        center.disa.commit()
+        center.diff.commit()
     }
-}
-
-#[cfg(test)]
-mod test {
-    use crate::save_data::*;
-    #[test]
-    fn struct_size() {
-        assert_eq!(SaveHeader::BYTE_LEN, 0x20);
-        assert_eq!(SaveFile::BYTE_LEN, 24);
-    }
-
 }

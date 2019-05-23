@@ -6,6 +6,31 @@ use std::rc::Rc;
 
 #[derive(ByteStruct)]
 #[byte_struct_le]
+pub struct FsInfo {
+    pub unknown: u32,
+    pub block_len: u32,
+    pub dir_hash_offset: u64,
+    pub dir_buckets: u32,
+    pub p0: u32,
+    pub file_hash_offset: u64,
+    pub file_buckets: u32,
+    pub p1: u32,
+    pub fat_offset: u64,
+    pub fat_size: u32,
+    pub p2: u32,
+    pub data_offset: u64,
+    pub data_block_count: u32,
+    pub p3: u32,
+    pub dir_table: u64,
+    pub max_dir: u32,
+    pub p4: u32,
+    pub file_table: u64,
+    pub max_file: u32,
+    pub p5: u32,
+}
+
+#[derive(ByteStruct)]
+#[byte_struct_le]
 struct U32le {
     v: u32,
 }

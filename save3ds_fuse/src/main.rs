@@ -3,24 +3,25 @@ use getopts::Options;
 use libc::{
     EBADF, EEXIST, EIO, EISDIR, ENAMETOOLONG, ENOENT, ENOSPC, ENOSYS, ENOTDIR, ENOTEMPTY, EROFS,
 };
+use libsave3ds::db::*;
 use libsave3ds::error::*;
 use libsave3ds::ext_data::*;
+use libsave3ds::file_system;
 use libsave3ds::save_data::*;
-use libsave3ds::save_ext_common;
 use libsave3ds::Resource;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::rc::Rc;
 use time;
 
-struct SaveExtFilesystem<T: save_ext_common::FileSystem> {
+struct SaveExtFilesystem<T: file_system::FileSystem> {
     save: Rc<T::CenterType>,
     fh_map: HashMap<u64, T::FileType>,
     next_fh: u64,
     read_only: bool,
 }
 
-impl<T: save_ext_common::FileSystem> SaveExtFilesystem<T> {
+impl<T: file_system::FileSystem> SaveExtFilesystem<T> {
     fn new(save: Rc<T::CenterType>, read_only: bool) -> SaveExtFilesystem<T> {
         SaveExtFilesystem::<T> {
             save,
@@ -73,61 +74,80 @@ fn is_legal_char(c: u8) -> bool {
     c >= 32 && c < 127 && c != 47 && c != 92
 }
 
-fn name_3ds_to_str(name: &[u8; 16]) -> String {
-    let mut last_char = 15;
-    loop {
-        if name[last_char] != 0 || last_char == 0 {
-            break;
-        }
-        last_char -= 1;
-    }
-
-    name[0..=last_char]
-        .iter()
-        .map(|x| {
-            if is_legal_char(*x) {
-                String::from_utf8(vec![*x]).unwrap()
-            } else {
-                format!("\\x{:02x}", *x)
-            }
-        })
-        .fold("".to_owned(), |mut x, y| {
-            x.push_str(&y);
-            x
-        })
+trait NameConvert {
+    fn name_3ds_to_str(name: &Self) -> String;
+    fn name_os_to_3ds(name: &OsStr) -> Option<Self>
+    where
+        Self: Sized;
 }
 
-fn name_os_to_3ds(name: &OsStr) -> Option<[u8; 16]> {
-    let mut name_converted = [0; 16];
-    let bytes = name.to_str()?.as_bytes();
-    let mut out_i = 0;
-    let mut in_i = 0;
-    loop {
-        if in_i == bytes.len() {
-            break;
-        }
-        if out_i == name_converted.len() {
-            return None;
+impl NameConvert for u64 {
+    fn name_3ds_to_str(name: &u64) -> String {
+        format!("{:016x}", name)
+    }
+
+    fn name_os_to_3ds(name: &OsStr) -> Option<u64> {
+        u64::from_str_radix(name.to_str()?, 16).ok()
+    }
+}
+
+impl NameConvert for [u8; 16] {
+    fn name_3ds_to_str(name: &[u8; 16]) -> String {
+        let mut last_char = 15;
+        loop {
+            if name[last_char] != 0 || last_char == 0 {
+                break;
+            }
+            last_char -= 1;
         }
 
-        if bytes[in_i] != b'\\' {
-            name_converted[out_i] = bytes[in_i];
-            out_i += 1;
-            in_i += 1;
-        } else {
-            in_i += 1;
-            if *bytes.get(in_i)? != b'x' {
+        name[0..=last_char]
+            .iter()
+            .map(|x| {
+                if is_legal_char(*x) {
+                    String::from_utf8(vec![*x]).unwrap()
+                } else {
+                    format!("\\x{:02x}", *x)
+                }
+            })
+            .fold("".to_owned(), |mut x, y| {
+                x.push_str(&y);
+                x
+            })
+    }
+
+    fn name_os_to_3ds(name: &OsStr) -> Option<[u8; 16]> {
+        let mut name_converted = [0; 16];
+        let bytes = name.to_str()?.as_bytes();
+        let mut out_i = 0;
+        let mut in_i = 0;
+        loop {
+            if in_i == bytes.len() {
+                break;
+            }
+            if out_i == name_converted.len() {
                 return None;
             }
-            in_i += 1;
-            name_converted[out_i] =
-                u8::from_str_radix(std::str::from_utf8(bytes.get(in_i..in_i + 2)?).ok()?, 16)
-                    .ok()?;
-            out_i += 1;
-            in_i += 2;
+
+            if bytes[in_i] != b'\\' {
+                name_converted[out_i] = bytes[in_i];
+                out_i += 1;
+                in_i += 1;
+            } else {
+                in_i += 1;
+                if *bytes.get(in_i)? != b'x' {
+                    return None;
+                }
+                in_i += 1;
+                name_converted[out_i] =
+                    u8::from_str_radix(std::str::from_utf8(bytes.get(in_i..in_i + 2)?).ok()?, 16)
+                        .ok()?;
+                out_i += 1;
+                in_i += 2;
+            }
         }
+        Some(name_converted)
     }
-    Some(name_converted)
 }
 
 enum Ino {
@@ -152,7 +172,7 @@ impl Ino {
     }
 }
 
-impl<T: save_ext_common::FileSystem> Drop for SaveExtFilesystem<T> {
+impl<T: file_system::FileSystem> Drop for SaveExtFilesystem<T> {
     fn drop(&mut self) {
         if !self.read_only {
             T::commit(self.save.as_ref()).unwrap();
@@ -161,14 +181,17 @@ impl<T: save_ext_common::FileSystem> Drop for SaveExtFilesystem<T> {
     }
 }
 
-impl<T: save_ext_common::FileSystem> Filesystem for SaveExtFilesystem<T> {
+impl<T: file_system::FileSystem> Filesystem for SaveExtFilesystem<T>
+where
+    T::NameType: NameConvert + Clone,
+{
     fn init(&mut self, _req: &Request) -> Result<(), i32> {
         println!("Initialized");
         Ok(())
     }
 
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        let name_converted = if let Some(n) = name_os_to_3ds(name) {
+        let name_converted = if let Some(n) = T::NameType::name_os_to_3ds(name) {
             n
         } else {
             reply.error(ENAMETOOLONG);
@@ -187,7 +210,7 @@ impl<T: save_ext_common::FileSystem> Filesystem for SaveExtFilesystem<T> {
                     return;
                 };
 
-                if let Ok(child) = T::open_sub_dir(&parent_dir, name_converted) {
+                if let Ok(child) = T::open_sub_dir(&parent_dir, name_converted.clone()) {
                     let children_len = if let Ok(chidren) = T::list_sub_dir(&child) {
                         chidren.len()
                     } else {
@@ -331,7 +354,7 @@ impl<T: save_ext_common::FileSystem> Filesystem for SaveExtFilesystem<T> {
             reply.error(EROFS);
             return;
         }
-        let name_converted = if let Some(n) = name_os_to_3ds(name) {
+        let name_converted = if let Some(n) = T::NameType::name_os_to_3ds(name) {
             n
         } else {
             reply.error(ENAMETOOLONG);
@@ -380,7 +403,7 @@ impl<T: save_ext_common::FileSystem> Filesystem for SaveExtFilesystem<T> {
             reply.error(EROFS);
             return;
         }
-        let name_converted = if let Some(n) = name_os_to_3ds(name) {
+        let name_converted = if let Some(n) = T::NameType::name_os_to_3ds(name) {
             n
         } else {
             reply.error(ENAMETOOLONG);
@@ -422,7 +445,7 @@ impl<T: save_ext_common::FileSystem> Filesystem for SaveExtFilesystem<T> {
             reply.error(EROFS);
             return;
         }
-        let name_converted = if let Some(n) = name_os_to_3ds(name) {
+        let name_converted = if let Some(n) = T::NameType::name_os_to_3ds(name) {
             n
         } else {
             reply.error(ENAMETOOLONG);
@@ -459,7 +482,7 @@ impl<T: save_ext_common::FileSystem> Filesystem for SaveExtFilesystem<T> {
             reply.error(EROFS);
             return;
         }
-        let name_converted = if let Some(n) = name_os_to_3ds(name) {
+        let name_converted = if let Some(n) = T::NameType::name_os_to_3ds(name) {
             n
         } else {
             reply.error(ENAMETOOLONG);
@@ -632,7 +655,7 @@ impl<T: save_ext_common::FileSystem> Filesystem for SaveExtFilesystem<T> {
                         entries.push((
                             Ino::Dir(i).to_os(),
                             FileType::Directory,
-                            name_3ds_to_str(&name),
+                            T::NameType::name_3ds_to_str(&name),
                         ));
                     }
 
@@ -646,7 +669,7 @@ impl<T: save_ext_common::FileSystem> Filesystem for SaveExtFilesystem<T> {
                         entries.push((
                             Ino::File(i).to_os(),
                             FileType::RegularFile,
-                            name_3ds_to_str(&name),
+                            T::NameType::name_3ds_to_str(&name),
                         ));
                     }
 
@@ -676,13 +699,13 @@ impl<T: save_ext_common::FileSystem> Filesystem for SaveExtFilesystem<T> {
             return;
         }
 
-        let name_converted = if let Some(n) = name_os_to_3ds(name) {
+        let name_converted = if let Some(n) = T::NameType::name_os_to_3ds(name) {
             n
         } else {
             reply.error(ENAMETOOLONG);
             return;
         };
-        let newname_converted = if let Some(n) = name_os_to_3ds(newname) {
+        let newname_converted = if let Some(n) = T::NameType::name_os_to_3ds(newname) {
             n
         } else {
             reply.error(ENAMETOOLONG);
@@ -717,8 +740,8 @@ impl<T: save_ext_common::FileSystem> Filesystem for SaveExtFilesystem<T> {
             },
         };
 
-        if let Ok(mut file) = T::open_sub_file(&dir, name_converted) {
-            if let Ok(old_file) = T::open_sub_file(&newdir, newname_converted) {
+        if let Ok(mut file) = T::open_sub_file(&dir, name_converted.clone()) {
+            if let Ok(old_file) = T::open_sub_file(&newdir, newname_converted.clone()) {
                 match T::file_delete(old_file) {
                     Ok(()) => (),
                     Err(_) => {
@@ -728,13 +751,13 @@ impl<T: save_ext_common::FileSystem> Filesystem for SaveExtFilesystem<T> {
                 }
             }
 
-            match T::file_rename(&mut file, &newdir, newname_converted) {
+            match T::file_rename(&mut file, &newdir, newname_converted.clone()) {
                 Ok(()) => reply.ok(),
                 Err(Error::AlreadyExist) => reply.error(EEXIST),
                 Err(_) => reply.error(EIO),
             }
-        } else if let Ok(mut dir) = T::open_sub_dir(&dir, name_converted) {
-            if let Ok(old_dir) = T::open_sub_dir(&newdir, newname_converted) {
+        } else if let Ok(mut dir) = T::open_sub_dir(&dir, name_converted.clone()) {
+            if let Ok(old_dir) = T::open_sub_dir(&newdir, newname_converted.clone()) {
                 match T::dir_delete(old_dir) {
                     Ok(()) => (),
                     Err(Error::NotEmpty) => {
@@ -780,6 +803,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
     opts.optopt("", "nand", "NAND root path", "DIR");
     opts.optopt("", "nandext", "mount the NAND Extdata with the ID", "ID");
     opts.optopt("", "nandsave", "mount the NAND save with the ID", "ID");
+    opts.optopt("", "db", "mount a database", "DB_TYPE");
 
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
@@ -811,6 +835,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
     let nand_path = matches.opt_str("nand");
     let nand_ext_id = matches.opt_str("nandext");
     let nand_save_id = matches.opt_str("nandsave");
+    let db_type = matches.opt_str("db");
 
     if [
         &sd_save_id,
@@ -818,6 +843,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
         &nand_save_id,
         &nand_ext_id,
         &bare_path,
+        &db_type,
     ]
     .iter()
     .map(|x| if x.is_none() { 0 } else { 1 })
@@ -826,7 +852,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
     {
         println!(
             "One and only one of the following arguments must be supplied:
-    --sdext, --sdsave, --nandsave, --nandext, --bare"
+    --sdext, --sdsave, --nandsave, --nandext, --bare, --db"
         );
         return Ok(());
     }
@@ -877,6 +903,19 @@ fn main() -> Result<(), Box<std::error::Error>> {
             &mountpoint,
             &options,
         )?;
+    } else if let Some(db_type) = db_type {
+        let db_type = match db_type.as_ref() {
+            "nandtitle" => DbType::NandTitle,
+            _ => {
+                println!("Unknown database type {}", db_type);
+                return Ok(());
+            }
+        };
+        mount(
+            SaveExtFilesystem::<DbFileSystem>::new(resource.open_db(db_type)?, read_only),
+            &mountpoint,
+            &options,
+        )?;
     } else {
         panic!()
     };
@@ -890,42 +929,46 @@ mod test {
     #[test]
     fn test_string_conversion() {
         assert_eq!(
-            name_3ds_to_str(&[b'a', b'b', b'c', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+            <[u8; 16]>::name_3ds_to_str(&[b'a', b'b', b'c', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
             "abc"
         );
 
         assert_eq!(
-            name_3ds_to_str(&[b'a', b'b', b'c', 0, 0, 0, b'd', 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+            <[u8; 16]>::name_3ds_to_str(&[
+                b'a', b'b', b'c', 0, 0, 0, b'd', 0, 0, 0, 0, 0, 0, 0, 0, 0
+            ]),
             "abc\\x00\\x00\\x00d"
         );
 
         assert_eq!(
-            name_3ds_to_str(&[b'a', b'/', b'\n', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+            <[u8; 16]>::name_3ds_to_str(&[
+                b'a', b'/', b'\n', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+            ]),
             "a\\x2f\\x0a"
         );
 
         assert_eq!(
-            name_3ds_to_str(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+            <[u8; 16]>::name_3ds_to_str(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
             "\\x00"
         );
 
         assert_eq!(
-            name_os_to_3ds(OsStr::new("abc")),
+            <[u8; 16]>::name_os_to_3ds(OsStr::new("abc")),
             Some([b'a', b'b', b'c', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
         );
         assert_eq!(
-            name_os_to_3ds(OsStr::new("a\\x12c")),
+            <[u8; 16]>::name_os_to_3ds(OsStr::new("a\\x12c")),
             Some([b'a', 0x12, b'c', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
         );
         assert_eq!(
-            name_os_to_3ds(OsStr::new("a\\x12\x34c")),
+            <[u8; 16]>::name_os_to_3ds(OsStr::new("a\\x12\x34c")),
             Some([b'a', 0x12, 0x34, b'c', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
         );
-        assert_eq!(name_os_to_3ds(OsStr::new("a\\2c")), None);
-        assert_eq!(name_os_to_3ds(OsStr::new("a\\x1")), None);
-        assert_eq!(name_os_to_3ds(OsStr::new("a\\x")), None);
-        assert_eq!(name_os_to_3ds(OsStr::new("a\\")), None);
-        assert!(name_os_to_3ds(OsStr::new("aaaaaaaaaaaaaaaa")).is_some());
-        assert!(name_os_to_3ds(OsStr::new("aaaaaaaaaaaaaaaaa")).is_none());
+        assert_eq!(<[u8; 16]>::name_os_to_3ds(OsStr::new("a\\2c")), None);
+        assert_eq!(<[u8; 16]>::name_os_to_3ds(OsStr::new("a\\x1")), None);
+        assert_eq!(<[u8; 16]>::name_os_to_3ds(OsStr::new("a\\x")), None);
+        assert_eq!(<[u8; 16]>::name_os_to_3ds(OsStr::new("a\\")), None);
+        assert!(<[u8; 16]>::name_os_to_3ds(OsStr::new("aaaaaaaaaaaaaaaa")).is_some());
+        assert!(<[u8; 16]>::name_os_to_3ds(OsStr::new("aaaaaaaaaaaaaaaaa")).is_none());
     }
 }

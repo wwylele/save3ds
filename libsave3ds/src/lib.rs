@@ -1,4 +1,5 @@
 mod aes_ctr_file;
+pub mod db;
 mod diff;
 mod difi_partition;
 mod disa;
@@ -8,6 +9,7 @@ mod dual_file;
 pub mod error;
 pub mod ext_data;
 mod fat;
+pub mod file_system;
 mod fs_meta;
 mod ivfc_level;
 mod key_engine;
@@ -15,12 +17,13 @@ mod memory_file;
 mod nand;
 mod random_access_file;
 pub mod save_data;
-pub mod save_ext_common;
+mod save_ext_common;
 mod sd;
 mod sd_nand_common;
 mod signed_file;
 mod sub_file;
 
+use db::*;
 use disk_file::DiskFile;
 use error::*;
 use ext_data::*;
@@ -183,5 +186,18 @@ impl Resource {
         )?);
 
         SaveData::new(file, SaveDataType::Bare)
+    }
+
+    pub fn open_db(&self, db_type: DbType) -> Result<Rc<Db>, Error> {
+        let file = match db_type {
+            DbType::NandTitle => self
+                .nand
+                .as_ref()
+                .ok_or(Error::NoNand)?
+                .open(&["dbs", "title.db"])?,
+            _ => unimplemented!(),
+        };
+
+        Db::new(file, db_type)
     }
 }

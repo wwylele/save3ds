@@ -1,7 +1,8 @@
 use crate::diff::Diff;
 use crate::error::*;
 use crate::fat::*;
-use crate::fs_meta::{self, FileInfo};
+use crate::file_system::*;
+use crate::fs_meta::{self, FileInfo, FsInfo};
 use crate::random_access_file::*;
 use crate::save_ext_common::*;
 use crate::sd_nand_common::*;
@@ -220,6 +221,7 @@ impl FileSystem for ExtDataFileSystem {
     type CenterType = ExtData;
     type FileType = File;
     type DirType = Dir;
+    type NameType = [u8; 16];
 
     fn file_open_ino(center: Rc<Self::CenterType>, ino: u32) -> Result<Self::FileType, Error> {
         let meta = FileMeta::open_ino(center.fs.clone(), ino)?;
