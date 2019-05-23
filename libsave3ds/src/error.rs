@@ -21,6 +21,8 @@ pub enum Error {
     NotEmpty,
     Unsupported,
     UniqueIdMismatch,
+    NoOtp,
+    BrokenOtp,
 }
 
 impl fmt::Display for Error {

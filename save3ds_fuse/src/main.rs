@@ -14,16 +14,16 @@ use std::ffi::OsStr;
 use std::rc::Rc;
 use time;
 
-struct SaveExtFilesystem<T: file_system::FileSystem> {
+struct FileSystemFrontend<T: file_system::FileSystem> {
     save: Rc<T::CenterType>,
     fh_map: HashMap<u64, T::FileType>,
     next_fh: u64,
     read_only: bool,
 }
 
-impl<T: file_system::FileSystem> SaveExtFilesystem<T> {
-    fn new(save: Rc<T::CenterType>, read_only: bool) -> SaveExtFilesystem<T> {
-        SaveExtFilesystem::<T> {
+impl<T: file_system::FileSystem> FileSystemFrontend<T> {
+    fn new(save: Rc<T::CenterType>, read_only: bool) -> FileSystemFrontend<T> {
+        FileSystemFrontend::<T> {
             save,
             fh_map: HashMap::new(),
             next_fh: 1,
@@ -172,7 +172,7 @@ impl Ino {
     }
 }
 
-impl<T: file_system::FileSystem> Drop for SaveExtFilesystem<T> {
+impl<T: file_system::FileSystem> Drop for FileSystemFrontend<T> {
     fn drop(&mut self) {
         if !self.read_only {
             T::commit(self.save.as_ref()).unwrap();
@@ -181,7 +181,7 @@ impl<T: file_system::FileSystem> Drop for SaveExtFilesystem<T> {
     }
 }
 
-impl<T: file_system::FileSystem> Filesystem for SaveExtFilesystem<T>
+impl<T: file_system::FileSystem> Filesystem for FileSystemFrontend<T>
 where
     T::NameType: NameConvert + Clone,
 {
@@ -797,13 +797,20 @@ fn main() -> Result<(), Box<std::error::Error>> {
     opts.optopt("m", "movable", "movable.sed file path", "FILE");
     opts.optflag("r", "readonly", "mount as read-only file system");
     opts.optopt("", "bare", "mount a bare DISA file", "FILE");
+    opts.optopt(
+        "",
+        "db",
+        "mount a database. DB_TYPE is one of the following:
+    nandtitle, nandimport, tmptitle, tmpimport, sdtitle, sdimport, ticket",
+        "DB_TYPE",
+    );
     opts.optopt("", "sd", "SD root path", "DIR");
     opts.optopt("", "sdext", "mount the SD Extdata with the ID", "ID");
     opts.optopt("", "sdsave", "mount the SD save with the ID", "ID");
     opts.optopt("", "nand", "NAND root path", "DIR");
     opts.optopt("", "nandext", "mount the NAND Extdata with the ID", "ID");
     opts.optopt("", "nandsave", "mount the NAND save with the ID", "ID");
-    opts.optopt("", "db", "mount a database", "DB_TYPE");
+    opts.optopt("o", "otp", "(unimplemented yet) OTP file path", "FILE");
 
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
@@ -828,6 +835,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
     let boot9_path = matches.opt_str("boot9");
     let movable_path = matches.opt_str("movable");
+    let otp_path = matches.opt_str("otp");
     let bare_path = matches.opt_str("bare");
     let sd_path = matches.opt_str("sd");
     let sd_save_id = matches.opt_str("sdsave");
@@ -857,7 +865,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
         return Ok(());
     }
 
-    let resource = Resource::new(boot9_path, movable_path, sd_path, nand_path)?;
+    let resource = Resource::new(boot9_path, movable_path, sd_path, nand_path, otp_path)?;
 
     let read_only = matches.opt_present("r");
     let options = [];
@@ -868,7 +876,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
         );
 
         mount(
-            SaveExtFilesystem::<SaveDataFileSystem>::new(
+            FileSystemFrontend::<SaveDataFileSystem>::new(
                 resource.open_bare_save(&bare)?,
                 read_only,
             ),
@@ -878,41 +886,47 @@ fn main() -> Result<(), Box<std::error::Error>> {
     } else if let Some(id) = nand_save_id {
         let id = u32::from_str_radix(&id, 16)?;
         mount(
-            SaveExtFilesystem::<SaveDataFileSystem>::new(resource.open_nand_save(id)?, read_only),
+            FileSystemFrontend::<SaveDataFileSystem>::new(resource.open_nand_save(id)?, read_only),
             &mountpoint,
             &options,
         )?;
     } else if let Some(id) = sd_save_id {
         let id = u64::from_str_radix(&id, 16)?;
         mount(
-            SaveExtFilesystem::<SaveDataFileSystem>::new(resource.open_sd_save(id)?, read_only),
+            FileSystemFrontend::<SaveDataFileSystem>::new(resource.open_sd_save(id)?, read_only),
             &mountpoint,
             &options,
         )?;
     } else if let Some(id) = sd_ext_id {
         let id = u64::from_str_radix(&id, 16)?;
         mount(
-            SaveExtFilesystem::<ExtDataFileSystem>::new(resource.open_sd_ext(id)?, read_only),
+            FileSystemFrontend::<ExtDataFileSystem>::new(resource.open_sd_ext(id)?, read_only),
             &mountpoint,
             &options,
         )?;
     } else if let Some(id) = nand_ext_id {
         let id = u64::from_str_radix(&id, 16)?;
         mount(
-            SaveExtFilesystem::<ExtDataFileSystem>::new(resource.open_nand_ext(id)?, read_only),
+            FileSystemFrontend::<ExtDataFileSystem>::new(resource.open_nand_ext(id)?, read_only),
             &mountpoint,
             &options,
         )?;
     } else if let Some(db_type) = db_type {
         let db_type = match db_type.as_ref() {
             "nandtitle" => DbType::NandTitle,
+            "nandimport" => DbType::NandImport,
+            "tmptitle" => DbType::TmpTitle,
+            "tmpimport" => DbType::TmpImport,
+            "sdtitle" => DbType::SdTitle,
+            "sdimport" => DbType::SdImport,
+            "ticket" => DbType::Ticket,
             _ => {
                 println!("Unknown database type {}", db_type);
                 return Ok(());
             }
         };
         mount(
-            SaveExtFilesystem::<DbFileSystem>::new(resource.open_db(db_type)?, read_only),
+            FileSystemFrontend::<DbFileSystem>::new(resource.open_db(db_type)?, read_only),
             &mountpoint,
             &options,
         )?;

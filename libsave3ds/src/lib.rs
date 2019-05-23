@@ -23,6 +23,9 @@ mod sd_nand_common;
 mod signed_file;
 mod sub_file;
 
+use aes::block_cipher_trait::generic_array::GenericArray;
+use aes::block_cipher_trait::*;
+use aes::*;
 use db::*;
 use disk_file::DiskFile;
 use error::*;
@@ -61,17 +64,28 @@ impl Resource {
         movable_path: Option<String>,
         sd_path: Option<String>,
         nand_path: Option<String>,
+        otp_path: Option<String>,
     ) -> Result<Resource, Error> {
-        let (key_x_sign, key_x_dec) = if let Some(boot9) = boot9_path {
+        let (key_x_sign, key_x_dec, key_otp, iv_otp) = if let Some(boot9) = boot9_path {
             let mut boot9 = std::fs::File::open(boot9)?;
             let mut key_x_sign = [0; 16];
             let mut key_x_dec = [0; 16];
+            let mut key_otp = [0; 16];
+            let mut iv_otp = [0; 16];
             boot9.seek(SeekFrom::Start(0xD9E0))?;
             boot9.read_exact(&mut key_x_sign)?;
             boot9.read_exact(&mut key_x_dec)?;
-            (Some(key_x_sign), Some(key_x_dec))
+            boot9.seek(SeekFrom::Start(0xD6E0))?;
+            boot9.read_exact(&mut key_otp)?;
+            boot9.read_exact(&mut iv_otp)?;
+            (
+                Some(key_x_sign),
+                Some(key_x_dec),
+                Some(key_otp),
+                Some(iv_otp),
+            )
         } else {
-            (None, None)
+            (None, None, None, None)
         };
 
         let movable = if let Some(nand_path) = &nand_path {
@@ -101,6 +115,32 @@ impl Resource {
         } else {
             None
         };
+
+        if let Some(otp_path) = otp_path {
+            let key_otp = key_otp.ok_or(Error::NoBoot9)?;
+            let mut iv_otp = iv_otp.ok_or(Error::NoBoot9)?;
+            let mut otp_file = std::fs::File::open(otp_path)?;
+            let mut otp = [0; 0x100];
+            otp_file.read_exact(&mut otp)?;
+            let aes128 = Aes128::new(GenericArray::from_slice(&key_otp));
+            for block in otp.chunks_exact_mut(0x10) {
+                let mut pad = [0; 16];
+                pad.copy_from_slice(block);
+                aes128.decrypt_block(GenericArray::from_mut_slice(block));
+                for (i, b) in block.iter_mut().enumerate() {
+                    *b ^= iv_otp[i];
+                }
+                iv_otp = pad;
+            }
+
+            let mut hasher = Sha256::new();
+            hasher.input(&otp[0..0xE0]);
+            if otp[0xE0..0x100] != hasher.result()[..] {
+                return make_error(Error::BrokenOtp);
+            }
+
+            // TODO: extract console unique key
+        }
 
         Ok(Resource {
             sd,
@@ -189,15 +229,64 @@ impl Resource {
     }
 
     pub fn open_db(&self, db_type: DbType) -> Result<Rc<Db>, Error> {
-        let file = match db_type {
-            DbType::NandTitle => self
-                .nand
-                .as_ref()
-                .ok_or(Error::NoNand)?
-                .open(&["dbs", "title.db"])?,
-            _ => unimplemented!(),
+        let (file, key) = match db_type {
+            DbType::NandTitle => (
+                self.nand
+                    .as_ref()
+                    .ok_or(Error::NoNand)?
+                    .open(&["dbs", "title.db"])?,
+                None,
+            ),
+            DbType::NandImport => (
+                self.nand
+                    .as_ref()
+                    .ok_or(Error::NoNand)?
+                    .open(&["dbs", "import.db"])?,
+                None,
+            ),
+            DbType::TmpTitle => (
+                self.nand
+                    .as_ref()
+                    .ok_or(Error::NoNand)?
+                    .open(&["dbs", "tmp_t.db"])?,
+                None,
+            ),
+            DbType::TmpImport => (
+                self.nand
+                    .as_ref()
+                    .ok_or(Error::NoNand)?
+                    .open(&["dbs", "tmp_i.db"])?,
+                None,
+            ),
+            DbType::SdTitle => (
+                self.sd
+                    .as_ref()
+                    .ok_or(Error::NoSd)?
+                    .open(&["dbs", "title.db"])?,
+                Some(scramble(
+                    self.key_x_sign.ok_or(Error::NoBoot9)?,
+                    self.key_y.ok_or(Error::NoMovable)?,
+                )),
+            ),
+            DbType::SdImport => (
+                self.sd
+                    .as_ref()
+                    .ok_or(Error::NoSd)?
+                    .open(&["dbs", "import.db"])?,
+                Some(scramble(
+                    self.key_x_sign.ok_or(Error::NoBoot9)?,
+                    self.key_y.ok_or(Error::NoMovable)?,
+                )),
+            ),
+            DbType::Ticket => (
+                self.nand
+                    .as_ref()
+                    .ok_or(Error::NoNand)?
+                    .open(&["dbs", "ticket.db"])?,
+                None,
+            ),
         };
 
-        Db::new(file, db_type)
+        Db::new(file, db_type, key)
     }
 }

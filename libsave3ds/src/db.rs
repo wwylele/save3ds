@@ -149,6 +149,19 @@ impl RandomAccessFile for FakeSizeFile {
     }
 }
 
+pub struct DbSigner {
+    pub id: u32,
+}
+
+impl Signer for DbSigner {
+    fn block(&self, mut data: Vec<u8>) -> Vec<u8> {
+        let mut result = Vec::from(&b"CTR-9DB0"[..]);
+        result.extend(&self.id.to_le_bytes());
+        result.append(&mut data);
+        result
+    }
+}
+
 pub struct Db {
     diff: Rc<Diff>,
     fat: Rc<Fat>,
@@ -157,9 +170,55 @@ pub struct Db {
 }
 
 impl Db {
-    pub fn new(file: Rc<RandomAccessFile>, db_type: DbType) -> Result<Rc<Db>, Error> {
-        let diff = Rc::new(Diff::new(file, None)?);
-        let pre_len = 0x80;
+    pub fn new(
+        file: Rc<RandomAccessFile>,
+        db_type: DbType,
+        key: Option<[u8; 16]>,
+    ) -> Result<Rc<Db>, Error> {
+        let signer = key.map(|key| -> (Box<Signer>, [u8; 16]) {
+            (
+                Box::new(DbSigner {
+                    id: match db_type {
+                        DbType::Ticket => 0,
+                        DbType::SdTitle | DbType::NandTitle => 2,
+                        DbType::SdImport | DbType::NandImport => 3,
+                        DbType::TmpTitle => 4,
+                        DbType::TmpImport => 5,
+                    },
+                }),
+                key,
+            )
+        });
+        let diff = Rc::new(Diff::new(file, signer)?);
+        let pre_len = if db_type == DbType::Ticket {
+            0x10
+        } else {
+            0x80
+        };
+
+        if db_type == DbType::Ticket {
+            let mut magic = [0; 4];
+            diff.partition().read(0, &mut magic)?;
+            if magic != *b"TICK" {
+                return make_error(Error::MagicMismatch);
+            }
+        } else {
+            let mut magic = [0; 8];
+            diff.partition().read(0, &mut magic)?;
+            if magic
+                != match db_type {
+                    DbType::NandTitle => *b"NANDTDB\0",
+                    DbType::NandImport => *b"NANDIDB\0",
+                    DbType::TmpTitle => *b"TEMPIDB\0",
+                    DbType::TmpImport => *b"TEMPIDB\0",
+                    DbType::SdTitle => *b"TEMPTDB\0",
+                    DbType::SdImport => *b"TEMPTDB\0",
+                    _ => unreachable!(),
+                }
+            {
+                return make_error(Error::MagicMismatch);
+            }
+        }
 
         let without_pre = Rc::new(SubFile::new(
             diff.partition().clone(),
