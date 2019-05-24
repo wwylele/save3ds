@@ -415,12 +415,13 @@ where
             reply.error(EROFS);
             return;
         }
-        let name_converted: T::NameType = if let Some((n, _)) = name_os_to_3ds(name) {
-            n
-        } else {
-            reply.error(ENAMETOOLONG);
-            return;
-        };
+        let (name_converted, size): (T::NameType, usize) =
+            if let Some((n, s)) = name_os_to_3ds(name) {
+                (n, str::parse::<usize>(s).unwrap_or(0))
+            } else {
+                reply.error(ENAMETOOLONG);
+                return;
+            };
         match Ino::from_os(parent) {
             Ino::File(_) => {
                 reply.error(ENOTDIR);
@@ -433,7 +434,7 @@ where
                     return;
                 };
 
-                match T::new_sub_file(&parent_dir, name_converted, 0) {
+                match T::new_sub_file(&parent_dir, name_converted, size) {
                     Ok(child) => reply.entry(
                         &time::Timespec::new(1, 0),
                         &Self::make_file_attr(
