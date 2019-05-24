@@ -17,13 +17,13 @@ impl Nand {
 }
 
 impl SdNandFileSystem for Nand {
-    fn open(&self, path: &[&str]) -> Result<Rc<RandomAccessFile>, Error> {
+    fn open(&self, path: &[&str], write: bool) -> Result<Rc<RandomAccessFile>, Error> {
         let file_path = path.iter().fold(self.path.clone(), |a, b| a.join(b));
 
         let file = DiskFile::new(
             std::fs::OpenOptions::new()
                 .read(true)
-                .write(true)
+                .write(write)
                 .open(file_path)?,
         )?;
 

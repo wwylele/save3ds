@@ -191,7 +191,7 @@ impl Resource {
         })
     }
 
-    pub fn open_sd_ext(&self, id: u64) -> Result<Rc<ExtData>, Error> {
+    pub fn open_sd_ext(&self, id: u64, write: bool) -> Result<Rc<ExtData>, Error> {
         ExtData::new(
             self.sd.as_ref().ok_or(Error::NoSd)?.clone(),
             vec!["extdata".to_owned()],
@@ -200,15 +200,20 @@ impl Resource {
                 self.key_x_sign.ok_or(Error::NoBoot9)?,
                 self.key_y.ok_or(Error::NoMovable)?,
             ),
+            write,
         )
     }
 
-    pub fn open_sd_save(&self, id: u64) -> Result<Rc<SaveData>, Error> {
+    pub fn open_sd_save(&self, id: u64, write: bool) -> Result<Rc<SaveData>, Error> {
         let id_high = format!("{:08x}", id >> 32);
         let id_low = format!("{:08x}", id & 0xFFFF_FFFF);
         let sub_path = ["title", &id_high, &id_low, "data", "00000001.sav"];
 
-        let dec_file = self.sd.as_ref().ok_or(Error::NoSd)?.open(&sub_path)?;
+        let dec_file = self
+            .sd
+            .as_ref()
+            .ok_or(Error::NoSd)?
+            .open(&sub_path, write)?;
 
         SaveData::new(
             dec_file,
@@ -222,14 +227,17 @@ impl Resource {
         )
     }
 
-    pub fn open_nand_save(&self, id: u32) -> Result<Rc<SaveData>, Error> {
-        let file = self.nand.as_ref().ok_or(Error::NoNand)?.open(&[
-            "data",
-            &hash_movable(self.key_y.ok_or(Error::NoNand)?),
-            "sysdata",
-            &format!("{:08x}", id),
-            "00000000",
-        ])?;
+    pub fn open_nand_save(&self, id: u32, write: bool) -> Result<Rc<SaveData>, Error> {
+        let file = self.nand.as_ref().ok_or(Error::NoNand)?.open(
+            &[
+                "data",
+                &hash_movable(self.key_y.ok_or(Error::NoNand)?),
+                "sysdata",
+                &format!("{:08x}", id),
+                "00000000",
+            ],
+            write,
+        )?;
         SaveData::new(
             file,
             SaveDataType::Nand(
@@ -242,7 +250,7 @@ impl Resource {
         )
     }
 
-    pub fn open_nand_ext(&self, id: u64) -> Result<Rc<ExtData>, Error> {
+    pub fn open_nand_ext(&self, id: u64, write: bool) -> Result<Rc<ExtData>, Error> {
         ExtData::new(
             self.nand.as_ref().ok_or(Error::NoNand)?.clone(),
             vec![
@@ -255,27 +263,28 @@ impl Resource {
                 self.key_x_sign.ok_or(Error::NoBoot9)?,
                 self.key_y.ok_or(Error::NoMovable)?,
             ),
+            write,
         )
     }
 
-    pub fn open_bare_save(&self, path: &str) -> Result<Rc<SaveData>, Error> {
+    pub fn open_bare_save(&self, path: &str, write: bool) -> Result<Rc<SaveData>, Error> {
         let file = Rc::new(DiskFile::new(
             std::fs::OpenOptions::new()
                 .read(true)
-                .write(true)
+                .write(write)
                 .open(path)?,
         )?);
 
         SaveData::new(file, SaveDataType::Bare)
     }
 
-    pub fn open_db(&self, db_type: DbType) -> Result<Rc<Db>, Error> {
+    pub fn open_db(&self, db_type: DbType, write: bool) -> Result<Rc<Db>, Error> {
         let (file, key) = match db_type {
             DbType::NandTitle => (
                 self.nand
                     .as_ref()
                     .ok_or(Error::NoNand)?
-                    .open(&["dbs", "title.db"])?,
+                    .open(&["dbs", "title.db"], write)?,
                 Some(scramble(
                     self.key_x_db.ok_or(Error::NoOtp)?,
                     self.key_y_db.ok_or(Error::NoBoot9)?,
@@ -285,7 +294,7 @@ impl Resource {
                 self.nand
                     .as_ref()
                     .ok_or(Error::NoNand)?
-                    .open(&["dbs", "import.db"])?,
+                    .open(&["dbs", "import.db"], write)?,
                 Some(scramble(
                     self.key_x_db.ok_or(Error::NoOtp)?,
                     self.key_y_db.ok_or(Error::NoBoot9)?,
@@ -295,7 +304,7 @@ impl Resource {
                 self.nand
                     .as_ref()
                     .ok_or(Error::NoNand)?
-                    .open(&["dbs", "tmp_t.db"])?,
+                    .open(&["dbs", "tmp_t.db"], write)?,
                 Some(scramble(
                     self.key_x_db.ok_or(Error::NoOtp)?,
                     self.key_y_db.ok_or(Error::NoBoot9)?,
@@ -305,7 +314,7 @@ impl Resource {
                 self.nand
                     .as_ref()
                     .ok_or(Error::NoNand)?
-                    .open(&["dbs", "tmp_i.db"])?,
+                    .open(&["dbs", "tmp_i.db"], write)?,
                 Some(scramble(
                     self.key_x_db.ok_or(Error::NoOtp)?,
                     self.key_y_db.ok_or(Error::NoBoot9)?,
@@ -315,7 +324,7 @@ impl Resource {
                 self.nand
                     .as_ref()
                     .ok_or(Error::NoNand)?
-                    .open(&["dbs", "ticket.db"])?,
+                    .open(&["dbs", "ticket.db"], write)?,
                 Some(scramble(
                     self.key_x_db.ok_or(Error::NoOtp)?,
                     self.key_y_db.ok_or(Error::NoBoot9)?,
@@ -325,7 +334,7 @@ impl Resource {
                 self.sd
                     .as_ref()
                     .ok_or(Error::NoSd)?
-                    .open(&["dbs", "title.db"])?,
+                    .open(&["dbs", "title.db"], write)?,
                 Some(scramble(
                     self.key_x_sign.ok_or(Error::NoBoot9)?,
                     self.key_y.ok_or(Error::NoMovable)?,
@@ -335,7 +344,7 @@ impl Resource {
                 self.sd
                     .as_ref()
                     .ok_or(Error::NoSd)?
-                    .open(&["dbs", "import.db"])?,
+                    .open(&["dbs", "import.db"], write)?,
                 Some(scramble(
                     self.key_x_sign.ok_or(Error::NoBoot9)?,
                     self.key_y.ok_or(Error::NoMovable)?,

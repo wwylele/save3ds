@@ -877,7 +877,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
         mount(
             FileSystemFrontend::<SaveDataFileSystem>::new(
-                resource.open_bare_save(&bare)?,
+                resource.open_bare_save(&bare, !read_only)?,
                 read_only,
             ),
             &mountpoint,
@@ -886,28 +886,40 @@ fn main() -> Result<(), Box<std::error::Error>> {
     } else if let Some(id) = nand_save_id {
         let id = u32::from_str_radix(&id, 16)?;
         mount(
-            FileSystemFrontend::<SaveDataFileSystem>::new(resource.open_nand_save(id)?, read_only),
+            FileSystemFrontend::<SaveDataFileSystem>::new(
+                resource.open_nand_save(id, !read_only)?,
+                read_only,
+            ),
             &mountpoint,
             &options,
         )?;
     } else if let Some(id) = sd_save_id {
         let id = u64::from_str_radix(&id, 16)?;
         mount(
-            FileSystemFrontend::<SaveDataFileSystem>::new(resource.open_sd_save(id)?, read_only),
+            FileSystemFrontend::<SaveDataFileSystem>::new(
+                resource.open_sd_save(id, !read_only)?,
+                read_only,
+            ),
             &mountpoint,
             &options,
         )?;
     } else if let Some(id) = sd_ext_id {
         let id = u64::from_str_radix(&id, 16)?;
         mount(
-            FileSystemFrontend::<ExtDataFileSystem>::new(resource.open_sd_ext(id)?, read_only),
+            FileSystemFrontend::<ExtDataFileSystem>::new(
+                resource.open_sd_ext(id, !read_only)?,
+                read_only,
+            ),
             &mountpoint,
             &options,
         )?;
     } else if let Some(id) = nand_ext_id {
         let id = u64::from_str_radix(&id, 16)?;
         mount(
-            FileSystemFrontend::<ExtDataFileSystem>::new(resource.open_nand_ext(id)?, read_only),
+            FileSystemFrontend::<ExtDataFileSystem>::new(
+                resource.open_nand_ext(id, !read_only)?,
+                read_only,
+            ),
             &mountpoint,
             &options,
         )?;
@@ -926,7 +938,10 @@ fn main() -> Result<(), Box<std::error::Error>> {
             }
         };
         mount(
-            FileSystemFrontend::<DbFileSystem>::new(resource.open_db(db_type)?, read_only),
+            FileSystemFrontend::<DbFileSystem>::new(
+                resource.open_db(db_type, !read_only)?,
+                read_only,
+            ),
             &mountpoint,
             &options,
         )?;

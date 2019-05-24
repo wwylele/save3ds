@@ -74,6 +74,7 @@ pub struct ExtData {
     fs: Rc<FsMeta>,
     meta_file: Diff,
     key: [u8; 16],
+    write: bool,
 }
 
 impl ExtData {
@@ -82,6 +83,7 @@ impl ExtData {
         base_path: Vec<String>,
         id: u64,
         key: [u8; 16],
+        write: bool,
     ) -> Result<Rc<ExtData>, Error> {
         let id_high = format!("{:08x}", id >> 32);
         let id_low = format!("{:08x}", id & 0xFFFF_FFFF);
@@ -91,7 +93,7 @@ impl ExtData {
             .chain([&id_high, &id_low, "00000000", "00000001"].iter().cloned())
             .collect();
         let meta_file = Diff::new(
-            sd_nand.open(&meta_path)?,
+            sd_nand.open(&meta_path, write)?,
             Some((
                 Box::new(ExtSigner {
                     id,
@@ -158,6 +160,7 @@ impl ExtData {
             fs,
             meta_file,
             key,
+            write,
         }))
     }
 }
@@ -188,7 +191,7 @@ impl File {
             )
             .collect();
         let data = Diff::new(
-            center.sd_nand.open(&path)?,
+            center.sd_nand.open(&path, center.write)?,
             Some((
                 Box::new(ExtSigner {
                     id: center.id,

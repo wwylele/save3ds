@@ -29,12 +29,12 @@ impl Sd {
 }
 
 impl SdNandFileSystem for Sd {
-    fn open(&self, path: &[&str]) -> Result<Rc<RandomAccessFile>, Error> {
+    fn open(&self, path: &[&str], write: bool) -> Result<Rc<RandomAccessFile>, Error> {
         let file_path = path.iter().fold(self.path.clone(), |a, b| a.join(b));
         let file = Rc::new(DiskFile::new(
             std::fs::OpenOptions::new()
                 .read(true)
-                .write(true)
+                .write(write)
                 .open(file_path)?,
         )?);
 
