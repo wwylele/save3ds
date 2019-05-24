@@ -164,7 +164,7 @@ impl Ino {
     }
 
     fn from_os(ino: u64) -> Ino {
-        if ino > 0x1_0000_0000 {
+        if ino >= 0x1_0000_0000 {
             Ino::File((ino - 0x1_0000_0000) as u32)
         } else {
             Ino::Dir(ino as u32)
@@ -810,7 +810,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
     opts.optopt("", "nand", "NAND root path", "DIR");
     opts.optopt("", "nandext", "mount the NAND Extdata with the ID", "ID");
     opts.optopt("", "nandsave", "mount the NAND save with the ID", "ID");
-    opts.optopt("o", "otp", "(unimplemented yet) OTP file path", "FILE");
+    opts.optopt("o", "otp", "OTP file path", "FILE");
 
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,

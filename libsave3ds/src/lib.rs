@@ -56,6 +56,8 @@ pub struct Resource {
     nand: Option<Rc<Nand>>,
     key_x_sign: Option<[u8; 16]>,
     key_y: Option<[u8; 16]>,
+    key_x_db: Option<[u8; 16]>,
+    key_y_db: Option<[u8; 16]>,
 }
 
 impl Resource {
@@ -66,27 +68,40 @@ impl Resource {
         nand_path: Option<String>,
         otp_path: Option<String>,
     ) -> Result<Resource, Error> {
-        let (key_x_sign, key_x_dec, key_otp, iv_otp) = if let Some(boot9) = boot9_path {
-            let mut boot9 = std::fs::File::open(boot9)?;
-            let mut key_x_sign = [0; 16];
-            let mut key_x_dec = [0; 16];
-            let mut key_otp = [0; 16];
-            let mut iv_otp = [0; 16];
-            boot9.seek(SeekFrom::Start(0xD9E0))?;
-            boot9.read_exact(&mut key_x_sign)?;
-            boot9.read_exact(&mut key_x_dec)?;
-            boot9.seek(SeekFrom::Start(0xD6E0))?;
-            boot9.read_exact(&mut key_otp)?;
-            boot9.read_exact(&mut iv_otp)?;
-            (
-                Some(key_x_sign),
-                Some(key_x_dec),
-                Some(key_otp),
-                Some(iv_otp),
-            )
-        } else {
-            (None, None, None, None)
-        };
+        let (key_x_sign, key_x_dec, key_otp, iv_otp, otp_salt, key_y_db) =
+            if let Some(boot9) = boot9_path {
+                let mut boot9 = std::fs::File::open(boot9)?;
+                let mut key_x_sign = [0; 16];
+                let mut key_x_dec = [0; 16];
+                let mut key_otp = [0; 16];
+                let mut iv_otp = [0; 16];
+                let mut otp_salt = [0; 36];
+                let mut otp_salt_iv = [0; 16];
+                let mut otp_salt_block = [0; 64];
+                let mut key_y_db = [0; 16];
+                boot9.seek(SeekFrom::Start(0xD9E0))?;
+                boot9.read_exact(&mut key_x_sign)?;
+                boot9.read_exact(&mut key_x_dec)?;
+                boot9.seek(SeekFrom::Start(0xD6E0))?;
+                boot9.read_exact(&mut key_otp)?;
+                boot9.read_exact(&mut iv_otp)?;
+                boot9.seek(SeekFrom::Start(0xD860))?;
+                boot9.read_exact(&mut otp_salt)?;
+                boot9.read_exact(&mut otp_salt_iv)?;
+                boot9.read_exact(&mut otp_salt_block)?;
+                boot9.seek(SeekFrom::Start(0xDAC0))?;
+                boot9.read_exact(&mut key_y_db)?;
+                (
+                    Some(key_x_sign),
+                    Some(key_x_dec),
+                    Some(key_otp),
+                    Some(iv_otp),
+                    Some((otp_salt, otp_salt_iv, otp_salt_block)),
+                    Some(key_y_db),
+                )
+            } else {
+                (None, None, None, None, None, None)
+            };
 
         let movable = if let Some(nand_path) = &nand_path {
             Some(PathBuf::from(nand_path).join("private").join("movable.sed"))
@@ -116,7 +131,7 @@ impl Resource {
             None
         };
 
-        if let Some(otp_path) = otp_path {
+        let key_x_db = if let Some(otp_path) = otp_path {
             let key_otp = key_otp.ok_or(Error::NoBoot9)?;
             let mut iv_otp = iv_otp.ok_or(Error::NoBoot9)?;
             let mut otp_file = std::fs::File::open(otp_path)?;
@@ -139,14 +154,40 @@ impl Resource {
                 return make_error(Error::BrokenOtp);
             }
 
-            // TODO: extract console unique key
-        }
+            let (otp_salt, mut otp_salt_iv, mut otp_salt_block) = otp_salt.ok_or(Error::NoBoot9)?;
+            let mut hasher = Sha256::new();
+            hasher.input(&otp[0x90..0xAC]);
+            hasher.input(&otp_salt[..]);
+            let hash = hasher.result();
+            let mut key_x = [0; 16];
+            let mut key_y = [0; 16];
+            key_x.copy_from_slice(&hash[0..16]);
+            key_y.copy_from_slice(&hash[16..32]);
+            let key = scramble(key_x, key_y);
+            let aes128 = Aes128::new(GenericArray::from_slice(&key));
+
+            for block in otp_salt_block.chunks_exact_mut(0x10) {
+                for (i, b) in block.iter_mut().enumerate() {
+                    *b ^= otp_salt_iv[i];
+                }
+                aes128.encrypt_block(GenericArray::from_mut_slice(block));
+                otp_salt_iv.copy_from_slice(&block);
+            }
+
+            let mut key_x_db = [0; 16];
+            key_x_db.copy_from_slice(&otp_salt_block[16..32]);
+            Some(key_x_db)
+        } else {
+            None
+        };
 
         Ok(Resource {
             sd,
             nand,
             key_x_sign,
             key_y,
+            key_x_db,
+            key_y_db,
         })
     }
 
@@ -235,28 +276,50 @@ impl Resource {
                     .as_ref()
                     .ok_or(Error::NoNand)?
                     .open(&["dbs", "title.db"])?,
-                None,
+                Some(scramble(
+                    self.key_x_db.ok_or(Error::NoOtp)?,
+                    self.key_y_db.ok_or(Error::NoBoot9)?,
+                )),
             ),
             DbType::NandImport => (
                 self.nand
                     .as_ref()
                     .ok_or(Error::NoNand)?
                     .open(&["dbs", "import.db"])?,
-                None,
+                Some(scramble(
+                    self.key_x_db.ok_or(Error::NoOtp)?,
+                    self.key_y_db.ok_or(Error::NoBoot9)?,
+                )),
             ),
             DbType::TmpTitle => (
                 self.nand
                     .as_ref()
                     .ok_or(Error::NoNand)?
                     .open(&["dbs", "tmp_t.db"])?,
-                None,
+                Some(scramble(
+                    self.key_x_db.ok_or(Error::NoOtp)?,
+                    self.key_y_db.ok_or(Error::NoBoot9)?,
+                )),
             ),
             DbType::TmpImport => (
                 self.nand
                     .as_ref()
                     .ok_or(Error::NoNand)?
                     .open(&["dbs", "tmp_i.db"])?,
-                None,
+                Some(scramble(
+                    self.key_x_db.ok_or(Error::NoOtp)?,
+                    self.key_y_db.ok_or(Error::NoBoot9)?,
+                )),
+            ),
+            DbType::Ticket => (
+                self.nand
+                    .as_ref()
+                    .ok_or(Error::NoNand)?
+                    .open(&["dbs", "ticket.db"])?,
+                Some(scramble(
+                    self.key_x_db.ok_or(Error::NoOtp)?,
+                    self.key_y_db.ok_or(Error::NoBoot9)?,
+                )),
             ),
             DbType::SdTitle => (
                 self.sd
@@ -277,13 +340,6 @@ impl Resource {
                     self.key_x_sign.ok_or(Error::NoBoot9)?,
                     self.key_y.ok_or(Error::NoMovable)?,
                 )),
-            ),
-            DbType::Ticket => (
-                self.nand
-                    .as_ref()
-                    .ok_or(Error::NoNand)?
-                    .open(&["dbs", "ticket.db"])?,
-                None,
             ),
         };
 

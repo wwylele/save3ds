@@ -9,13 +9,13 @@ The FUSE program only supports macOS and linux. I haven't added Windows support 
 Both the library and the FUSE program currently supports the following operations:
  - Full filesystem operation on save data stored on NAND, on SD or standalone
  - Most filesystem operation on extdata stored on NAND or on SD
+ - Editing title database and tickets (not fully tested)
 
 Note that the supported NAND format is in unpacked cleartext filesystem. If you want to read/write on the original NAND FAT image, you need to use other tools to extract the NAND data, or map another layer of FUSE (e.g. https://github.com/ihaveamac/ninfs)
 
 TODO:
  - Extdata file creation/deletion
  - Cartridge save data support
- - Title database support (listed here because it has similar data format as Extdata)
 
 ## Example command
 ```bash
