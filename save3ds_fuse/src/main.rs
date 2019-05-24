@@ -76,9 +76,21 @@ fn is_legal_char(c: u8) -> bool {
 
 trait NameConvert {
     fn name_3ds_to_str(name: &Self) -> String;
-    fn name_os_to_3ds(name: &OsStr) -> Option<Self>
+    fn name_str_to_3ds(name: &str) -> Option<Self>
     where
         Self: Sized;
+}
+
+fn name_os_to_3ds<T: NameConvert>(name: &OsStr) -> Option<(T, &str)> {
+    let s = name.to_str()?;
+    let argument_pos = s.find("\\+");
+    let (l, r) = if let Some(pos) = argument_pos {
+        let (l, r) = s.split_at(pos);
+        (l, &r[2..])
+    } else {
+        (s, "")
+    };
+    Some((T::name_str_to_3ds(l)?, r))
 }
 
 impl NameConvert for u64 {
@@ -86,8 +98,8 @@ impl NameConvert for u64 {
         format!("{:016x}", name)
     }
 
-    fn name_os_to_3ds(name: &OsStr) -> Option<u64> {
-        u64::from_str_radix(name.to_str()?, 16).ok()
+    fn name_str_to_3ds(name: &str) -> Option<u64> {
+        u64::from_str_radix(name, 16).ok()
     }
 }
 
@@ -116,9 +128,9 @@ impl NameConvert for [u8; 16] {
             })
     }
 
-    fn name_os_to_3ds(name: &OsStr) -> Option<[u8; 16]> {
+    fn name_str_to_3ds(name: &str) -> Option<[u8; 16]> {
         let mut name_converted = [0; 16];
-        let bytes = name.to_str()?.as_bytes();
+        let bytes = name.as_bytes();
         let mut out_i = 0;
         let mut in_i = 0;
         loop {
@@ -191,7 +203,7 @@ where
     }
 
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        let name_converted = if let Some(n) = T::NameType::name_os_to_3ds(name) {
+        let name_converted: T::NameType = if let Some((n, _)) = name_os_to_3ds(name) {
             n
         } else {
             reply.error(ENAMETOOLONG);
@@ -354,7 +366,7 @@ where
             reply.error(EROFS);
             return;
         }
-        let name_converted = if let Some(n) = T::NameType::name_os_to_3ds(name) {
+        let name_converted: T::NameType = if let Some((n, _)) = name_os_to_3ds(name) {
             n
         } else {
             reply.error(ENAMETOOLONG);
@@ -403,7 +415,7 @@ where
             reply.error(EROFS);
             return;
         }
-        let name_converted = if let Some(n) = T::NameType::name_os_to_3ds(name) {
+        let name_converted: T::NameType = if let Some((n, _)) = name_os_to_3ds(name) {
             n
         } else {
             reply.error(ENAMETOOLONG);
@@ -445,7 +457,7 @@ where
             reply.error(EROFS);
             return;
         }
-        let name_converted = if let Some(n) = T::NameType::name_os_to_3ds(name) {
+        let name_converted: T::NameType = if let Some((n, _)) = name_os_to_3ds(name) {
             n
         } else {
             reply.error(ENAMETOOLONG);
@@ -482,7 +494,7 @@ where
             reply.error(EROFS);
             return;
         }
-        let name_converted = if let Some(n) = T::NameType::name_os_to_3ds(name) {
+        let name_converted: T::NameType = if let Some((n, _)) = name_os_to_3ds(name) {
             n
         } else {
             reply.error(ENAMETOOLONG);
@@ -699,13 +711,13 @@ where
             return;
         }
 
-        let name_converted = if let Some(n) = T::NameType::name_os_to_3ds(name) {
+        let name_converted: T::NameType = if let Some((n, _)) = name_os_to_3ds(name) {
             n
         } else {
             reply.error(ENAMETOOLONG);
             return;
         };
-        let newname_converted = if let Some(n) = T::NameType::name_os_to_3ds(newname) {
+        let newname_converted: T::NameType = if let Some((n, _)) = name_os_to_3ds(newname) {
             n
         } else {
             reply.error(ENAMETOOLONG);
@@ -982,22 +994,45 @@ mod test {
         );
 
         assert_eq!(
-            <[u8; 16]>::name_os_to_3ds(OsStr::new("abc")),
-            Some([b'a', b'b', b'c', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+            name_os_to_3ds::<[u8; 16]>(OsStr::new("abc")),
+            Some((
+                [b'a', b'b', b'c', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                ""
+            ))
         );
         assert_eq!(
-            <[u8; 16]>::name_os_to_3ds(OsStr::new("a\\x12c")),
-            Some([b'a', 0x12, b'c', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+            name_os_to_3ds::<[u8; 16]>(OsStr::new("a\\x12c")),
+            Some((
+                [b'a', 0x12, b'c', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                ""
+            ))
         );
         assert_eq!(
-            <[u8; 16]>::name_os_to_3ds(OsStr::new("a\\x12\x34c")),
-            Some([b'a', 0x12, 0x34, b'c', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+            name_os_to_3ds::<[u8; 16]>(OsStr::new("a\\x12\x34c")),
+            Some((
+                [b'a', 0x12, 0x34, b'c', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                ""
+            ))
         );
-        assert_eq!(<[u8; 16]>::name_os_to_3ds(OsStr::new("a\\2c")), None);
-        assert_eq!(<[u8; 16]>::name_os_to_3ds(OsStr::new("a\\x1")), None);
-        assert_eq!(<[u8; 16]>::name_os_to_3ds(OsStr::new("a\\x")), None);
-        assert_eq!(<[u8; 16]>::name_os_to_3ds(OsStr::new("a\\")), None);
-        assert!(<[u8; 16]>::name_os_to_3ds(OsStr::new("aaaaaaaaaaaaaaaa")).is_some());
-        assert!(<[u8; 16]>::name_os_to_3ds(OsStr::new("aaaaaaaaaaaaaaaaa")).is_none());
+        assert_eq!(
+            name_os_to_3ds::<[u8; 16]>(OsStr::new("a\\x12\x34c\\+x\\yz")),
+            Some((
+                [b'a', 0x12, 0x34, b'c', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                "x\\yz"
+            ))
+        );
+        assert_eq!(
+            name_os_to_3ds::<[u8; 16]>(OsStr::new("a\\x12\x34c\\+")),
+            Some((
+                [b'a', 0x12, 0x34, b'c', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                ""
+            ))
+        );
+        assert_eq!(name_os_to_3ds::<[u8; 16]>(OsStr::new("a\\2c")), None);
+        assert_eq!(name_os_to_3ds::<[u8; 16]>(OsStr::new("a\\x1")), None);
+        assert_eq!(name_os_to_3ds::<[u8; 16]>(OsStr::new("a\\x")), None);
+        assert_eq!(name_os_to_3ds::<[u8; 16]>(OsStr::new("a\\")), None);
+        assert!(name_os_to_3ds::<[u8; 16]>(OsStr::new("aaaaaaaaaaaaaaaa")).is_some());
+        assert!(name_os_to_3ds::<[u8; 16]>(OsStr::new("aaaaaaaaaaaaaaaaa")).is_none());
     }
 }
