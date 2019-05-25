@@ -20,7 +20,11 @@ impl Sd {
                 .join("Nintendo 3DS")
                 .join(crate::hash_movable(key_y)),
         )?
-        .next()
+        .find(|a| {
+            a.as_ref()
+                .map(|a| a.file_type().map(|a| a.is_dir()).unwrap_or(false))
+                .unwrap_or(false)
+        })
         .ok_or(Error::NoSd)??
         .path();
         let key = scramble(key_x, key_y);
