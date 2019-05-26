@@ -68,6 +68,17 @@ struct DpfsDescriptor {
     padding3: u32,
 }
 
+pub struct DifiPartitionParam {
+    dpfs_level2_block_len: usize,
+    dpfs_level3_block_len: usize,
+    ivfc_level1_block_len: usize,
+    ivfc_level2_block_len: usize,
+    ivfc_level3_block_len: usize,
+    ivfc_level4_block_len: usize,
+    data_len: usize,
+    external_ivfc_level4: bool,
+}
+
 pub struct DifiPartition {
     dpfs_level1: Rc<DualFile>,
     dpfs_level2: Rc<DpfsLevel>,
@@ -78,7 +89,181 @@ pub struct DifiPartition {
     ivfc_level4: Rc<IvfcLevel>,
 }
 
+struct DifiPartitionInfo {
+    difi_header: DifiHeader,
+    ivfc_descriptor: IvfcDescriptor,
+    dpfs_descriptor: DpfsDescriptor,
+    descriptor_len: usize,
+    partition_len: usize,
+}
+
 impl DifiPartition {
+    fn calculate_info(param: &DifiPartitionParam) -> DifiPartitionInfo {
+        let ivfc_level4_len = param.data_len;
+        let ivfc_level3_len = (1 + (ivfc_level4_len - 1) / param.ivfc_level4_block_len) * 0x20;
+        let ivfc_level2_len = (1 + (ivfc_level3_len - 1) / param.ivfc_level3_block_len) * 0x20;
+        let ivfc_level1_len = (1 + (ivfc_level2_len - 1) / param.ivfc_level2_block_len) * 0x20;
+        let master_hash_len = (1 + (ivfc_level1_len - 1) / param.ivfc_level1_block_len) * 0x20;
+
+        fn align_up(offset: usize, align: usize) -> usize {
+            offset + (align - offset % align) % align
+        }
+
+        fn ivfc_align(offset: usize, len: usize, block_len: usize) -> usize {
+            if len >= 4 * block_len {
+                align_up(offset, block_len)
+            } else {
+                align_up(offset, 8)
+            }
+        }
+
+        let ivfc_level1_offset = 0;
+        let ivfc_level2_offset = ivfc_align(
+            ivfc_level1_offset + ivfc_level1_len,
+            ivfc_level2_len,
+            param.ivfc_level2_block_len,
+        );
+        let ivfc_level3_offset = ivfc_align(
+            ivfc_level2_offset + ivfc_level2_len,
+            ivfc_level3_len,
+            param.ivfc_level3_block_len,
+        );
+        let ivfc_level4_offset = ivfc_align(
+            ivfc_level3_offset + ivfc_level3_len,
+            ivfc_level4_len,
+            param.ivfc_level4_block_len,
+        );
+        let ivfc_end = ivfc_level4_offset + ivfc_level4_len;
+
+        let duplicate_data_len = if param.external_ivfc_level4 {
+            ivfc_level4_offset
+        } else {
+            ivfc_end
+        };
+
+        let dpfs_level3_len = align_up(duplicate_data_len, param.dpfs_level3_block_len);
+        let dpfs_level2_len = align_up(
+            (1 + (dpfs_level3_len / param.dpfs_level3_block_len - 1) / 32) * 4,
+            param.dpfs_level2_block_len,
+        );
+        let dpfs_level1_len = (1 + (dpfs_level2_len / param.dpfs_level2_block_len - 1) / 32) * 4;
+
+        let dpfs_level1_offset = 0;
+        let dpfs_level2_offset = dpfs_level1_offset + dpfs_level1_len * 2;
+        let dpfs_level3_offset = align_up(
+            dpfs_level2_offset + dpfs_level2_len * 2,
+            param.dpfs_level3_block_len,
+        );
+        let dpfs_end = dpfs_level3_offset + dpfs_level3_len * 2;
+
+        let (partition_len, external_ivfc_level4_offset) = if param.external_ivfc_level4 {
+            let ivfc_level4_offset = align_up(dpfs_end, param.ivfc_level4_block_len);
+            (ivfc_level4_offset + ivfc_level4_len, ivfc_level4_offset)
+        } else {
+            (dpfs_end, 0)
+        };
+
+        fn ilog(block_len: usize) -> u32 {
+            ((std::mem::size_of::<usize>() * 8) as u32 - block_len.leading_zeros() - 1)
+        }
+
+        let dpfs_descriptor = DpfsDescriptor {
+            magic: *b"DPFS",
+            version: 0x10000,
+            level1_offset: dpfs_level1_offset as u64,
+            level1_size: dpfs_level1_len as u64,
+            level1_block_log: 0,
+            padding1: 0,
+            level2_offset: dpfs_level2_offset as u64,
+            level2_size: dpfs_level2_len as u64,
+            level2_block_log: ilog(param.dpfs_level2_block_len),
+            padding2: 0,
+            level3_offset: dpfs_level3_offset as u64,
+            level3_size: dpfs_level3_len as u64,
+            level3_block_log: ilog(param.dpfs_level3_block_len),
+            padding3: 0,
+        };
+
+        let ivfc_descriptor = IvfcDescriptor {
+            magic: *b"IVFC",
+            version: 0x20000,
+            master_hash_size: master_hash_len as u64,
+            level1_offset: ivfc_level1_offset as u64,
+            level1_size: ivfc_level1_len as u64,
+            level1_block_log: ilog(param.ivfc_level1_block_len),
+            padding1: 0,
+            level2_offset: ivfc_level2_offset as u64,
+            level2_size: ivfc_level2_len as u64,
+            level2_block_log: ilog(param.ivfc_level2_block_len),
+            padding2: 0,
+            level3_offset: ivfc_level3_offset as u64,
+            level3_size: ivfc_level3_len as u64,
+            level3_block_log: ilog(param.ivfc_level3_block_len),
+            padding3: 0,
+            level4_offset: ivfc_level4_offset as u64,
+            level4_size: ivfc_level4_len as u64,
+            level4_block_log: ilog(param.ivfc_level4_block_len),
+            padding4: 0,
+            ivfc_descritor_size: IvfcDescriptor::BYTE_LEN as u64,
+        };
+
+        let ivfc_descriptor_offset = DifiHeader::BYTE_LEN;
+        let dpfs_descriptor_offset = ivfc_descriptor_offset + IvfcDescriptor::BYTE_LEN;
+        let master_hash_offset = dpfs_descriptor_offset + DpfsDescriptor::BYTE_LEN;
+        let descriptor_len = master_hash_offset + master_hash_len + 4; // extra 4 bytes for padding
+
+        let difi_header = DifiHeader {
+            magic: *b"DIFI",
+            version: 0x10000,
+            ivfc_descriptor_offset: ivfc_descriptor_offset as u64,
+            ivfc_descriptor_size: IvfcDescriptor::BYTE_LEN as u64,
+            dpfs_descriptor_offset: dpfs_descriptor_offset as u64,
+            dpfs_descriptor_size: DpfsDescriptor::BYTE_LEN as u64,
+            partition_hash_offset: master_hash_offset as u64,
+            partition_hash_size: master_hash_len as u64,
+            external_ivfc_level4: param.external_ivfc_level4 as u8,
+            dpfs_selector: 0,
+            padding: 0,
+            ivfc_level4_offset: external_ivfc_level4_offset as u64,
+        };
+
+        DifiPartitionInfo {
+            difi_header,
+            ivfc_descriptor,
+            dpfs_descriptor,
+            descriptor_len,
+            partition_len,
+        }
+    }
+
+    pub fn calculate_size(param: &DifiPartitionParam) -> (usize, usize) {
+        let info = DifiPartition::calculate_info(param);
+        (info.descriptor_len, info.partition_len)
+    }
+
+    pub fn format(
+        descriptor: Rc<RandomAccessFile>,
+        partition: Rc<RandomAccessFile>,
+        param: &DifiPartitionParam,
+    ) -> Result<DifiPartition, Error> {
+        let info = DifiPartition::calculate_info(param);
+        let ivfc_descriptor_offset = info.difi_header.ivfc_descriptor_offset as usize;
+        let dpfs_descriptor_offset = info.difi_header.dpfs_descriptor_offset as usize;
+        write_struct(descriptor.as_ref(), 0, info.difi_header)?;
+        write_struct(
+            descriptor.as_ref(),
+            ivfc_descriptor_offset,
+            info.ivfc_descriptor,
+        )?;
+        write_struct(
+            descriptor.as_ref(),
+            dpfs_descriptor_offset,
+            info.dpfs_descriptor,
+        )?;
+
+        DifiPartition::new(descriptor, partition)
+    }
+
     pub fn new(
         descriptor: Rc<RandomAccessFile>,
         partition: Rc<RandomAccessFile>,
@@ -255,12 +440,69 @@ impl RandomAccessFile for DifiPartition {
 #[cfg(test)]
 mod test {
     use crate::difi_partition::*;
+    use crate::memory_file::MemoryFile;
 
     #[test]
     fn struct_size() {
         assert_eq!(DifiHeader::BYTE_LEN, 0x44);
         assert_eq!(IvfcDescriptor::BYTE_LEN, 0x78);
         assert_eq!(DpfsDescriptor::BYTE_LEN, 0x50);
+    }
+
+    #[test]
+    fn fuzz() {
+        use rand::distributions::Standard;
+        use rand::prelude::*;
+
+        let mut rng = rand::thread_rng();
+        for _ in 0..10 {
+            let len = rng.gen_range(1, 10_000);
+
+            let param = DifiPartitionParam {
+                dpfs_level2_block_len: 1 << rng.gen_range(1, 10),
+                dpfs_level3_block_len: 1 << rng.gen_range(1, 10),
+                ivfc_level1_block_len: 1 << rng.gen_range(6, 10),
+                ivfc_level2_block_len: 1 << rng.gen_range(6, 10),
+                ivfc_level3_block_len: 1 << rng.gen_range(6, 10),
+                ivfc_level4_block_len: 1 << rng.gen_range(6, 10),
+                data_len: len,
+                external_ivfc_level4: rng.gen(),
+            };
+
+            let (descriptor_len, partition_len) = DifiPartition::calculate_size(&param);
+            let descriptor = Rc::new(MemoryFile::new(vec![0; descriptor_len]));
+            let partition = Rc::new(MemoryFile::new(vec![0; partition_len]));
+
+            let mut difi =
+                DifiPartition::format(descriptor.clone(), partition.clone(), &param).unwrap();
+            let init: Vec<u8> = rng.sample_iter(&Standard).take(len).collect();
+            difi.write(0, &init).unwrap();
+            let plain = MemoryFile::new(init);
+
+            for _ in 0..1000 {
+                let operation = rng.gen_range(1, 10);
+                if operation == 1 {
+                    difi.commit().unwrap();
+                    difi = DifiPartition::new(descriptor.clone(), partition.clone()).unwrap();
+                } else if operation < 4 {
+                    difi.commit().unwrap();
+                } else {
+                    let pos = rng.gen_range(0, len);
+                    let data_len = rng.gen_range(1, len - pos + 1);
+                    if operation < 7 {
+                        let mut a = vec![0; data_len];
+                        let mut b = vec![0; data_len];
+                        difi.read(pos, &mut a).unwrap();
+                        plain.read(pos, &mut b).unwrap();
+                        assert_eq!(a, b);
+                    } else {
+                        let a: Vec<u8> = rng.sample_iter(&Standard).take(data_len).collect();
+                        difi.write(pos, &a).unwrap();
+                        plain.write(pos, &a).unwrap();
+                    }
+                }
+            }
+        }
     }
 
 }
