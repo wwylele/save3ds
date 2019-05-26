@@ -51,6 +51,10 @@ fn hash_movable(key: [u8; 16]) -> String {
     result
 }
 
+fn align_up(offset: usize, align: usize) -> usize {
+    offset + (align - offset % align) % align
+}
+
 pub struct Resource {
     sd: Option<Rc<Sd>>,
     nand: Option<Rc<Nand>>,

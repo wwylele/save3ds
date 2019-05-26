@@ -278,29 +278,14 @@ mod test {
             dpfs_level.write(0, &init).unwrap();
             let plain = MemoryFile::new(init);
 
-            for _ in 0..1000 {
-                let operation = rng.gen_range(1, 10);
-                if operation == 1 {
-                    dpfs_level.commit().unwrap();
-                    dpfs_level = DpfsLevel::new(selector.clone(), pair.clone(), block_len).unwrap();
-                } else if operation < 4 {
-                    dpfs_level.commit().unwrap();
-                } else {
-                    let pos = rng.gen_range(0, len);
-                    let data_len = rng.gen_range(1, len - pos + 1);
-                    if operation < 7 {
-                        let mut a = vec![0; data_len];
-                        let mut b = vec![0; data_len];
-                        dpfs_level.read(pos, &mut a).unwrap();
-                        plain.read(pos, &mut b).unwrap();
-                        assert_eq!(a, b);
-                    } else {
-                        let a: Vec<u8> = rng.sample_iter(&Standard).take(data_len).collect();
-                        dpfs_level.write(pos, &a).unwrap();
-                        plain.write(pos, &a).unwrap();
-                    }
-                }
-            }
+            crate::random_access_file::fuzzer(
+                &mut dpfs_level,
+                |file| file,
+                |file| file.commit().unwrap(),
+                || DpfsLevel::new(selector.clone(), pair.clone(), block_len).unwrap(),
+                &plain,
+                len,
+            );
         }
     }
 }

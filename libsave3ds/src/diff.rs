@@ -1,4 +1,5 @@
-use crate::difi_partition::DifiPartition;
+use crate::align_up;
+use crate::difi_partition::*;
 use crate::dual_file::DualFile;
 use crate::error::*;
 use crate::ivfc_level::IvfcLevel;
@@ -33,6 +34,47 @@ pub struct Diff {
 }
 
 impl Diff {
+    pub fn calculate_size(param: &DifiPartitionParam) -> usize {
+        let (descriptor_len, partition_len) = DifiPartition::calculate_size(param);
+        let max_align = *[
+            param.dpfs_level2_block_len,
+            param.dpfs_level3_block_len,
+            param.ivfc_level1_block_len,
+            param.ivfc_level2_block_len,
+            param.ivfc_level3_block_len,
+            param.ivfc_level4_block_len,
+        ]
+        .iter()
+        .max()
+        .unwrap();
+        align_up(0x200 + descriptor_len * 2, max_align) + partition_len
+    }
+
+    /*pub fn format(
+        file: Rc<RandomAccessFile>,
+        signer: Option<(Box<Signer>, [u8; 16])>,
+        param: &DifiPartitionParam,
+        unique_id: u64,
+    ) -> Result<Diff, Error> {
+        let (descriptor_len, partition_len) = DifiPartition::calculate_size(param);
+
+        let header = DiffHeader {
+            magic: *b"DIFF",
+            version: 0x30000,
+            secondary_table_offset: 0x200,
+            primary_table_offset: 0x200 + descriptor_len as usize,
+            table_size: descriptor_len as u64,
+            partition_offset: 0x200 + descriptor_len as usize * 2,
+            partition_size: partition_len as usize,
+            active_table: 1,
+            padding: [0; 3],
+            sha: [u8; 0x20],
+            unique_id: u64,
+        };
+
+        Diff::new(file, signer)
+    }*/
+
     pub fn new(
         file: Rc<RandomAccessFile>,
         signer: Option<(Box<Signer>, [u8; 16])>,

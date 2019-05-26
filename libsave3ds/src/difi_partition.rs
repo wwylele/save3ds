@@ -1,3 +1,4 @@
+use crate::align_up;
 use crate::dpfs_level::DpfsLevel;
 use crate::dual_file::DualFile;
 use crate::error::*;
@@ -69,14 +70,14 @@ struct DpfsDescriptor {
 }
 
 pub struct DifiPartitionParam {
-    dpfs_level2_block_len: usize,
-    dpfs_level3_block_len: usize,
-    ivfc_level1_block_len: usize,
-    ivfc_level2_block_len: usize,
-    ivfc_level3_block_len: usize,
-    ivfc_level4_block_len: usize,
-    data_len: usize,
-    external_ivfc_level4: bool,
+    pub dpfs_level2_block_len: usize,
+    pub dpfs_level3_block_len: usize,
+    pub ivfc_level1_block_len: usize,
+    pub ivfc_level2_block_len: usize,
+    pub ivfc_level3_block_len: usize,
+    pub ivfc_level4_block_len: usize,
+    pub data_len: usize,
+    pub external_ivfc_level4: bool,
 }
 
 pub struct DifiPartition {
@@ -104,10 +105,6 @@ impl DifiPartition {
         let ivfc_level2_len = (1 + (ivfc_level3_len - 1) / param.ivfc_level3_block_len) * 0x20;
         let ivfc_level1_len = (1 + (ivfc_level2_len - 1) / param.ivfc_level2_block_len) * 0x20;
         let master_hash_len = (1 + (ivfc_level1_len - 1) / param.ivfc_level1_block_len) * 0x20;
-
-        fn align_up(offset: usize, align: usize) -> usize {
-            offset + (align - offset % align) % align
-        }
 
         fn ivfc_align(offset: usize, len: usize, block_len: usize) -> usize {
             if len >= 4 * block_len {
@@ -243,9 +240,8 @@ impl DifiPartition {
 
     pub fn format(
         descriptor: Rc<RandomAccessFile>,
-        partition: Rc<RandomAccessFile>,
         param: &DifiPartitionParam,
-    ) -> Result<DifiPartition, Error> {
+    ) -> Result<(), Error> {
         let info = DifiPartition::calculate_info(param);
         let ivfc_descriptor_offset = info.difi_header.ivfc_descriptor_offset as usize;
         let dpfs_descriptor_offset = info.difi_header.dpfs_descriptor_offset as usize;
@@ -261,7 +257,7 @@ impl DifiPartition {
             info.dpfs_descriptor,
         )?;
 
-        DifiPartition::new(descriptor, partition)
+        Ok(())
     }
 
     pub fn new(
@@ -473,35 +469,20 @@ mod test {
             let descriptor = Rc::new(MemoryFile::new(vec![0; descriptor_len]));
             let partition = Rc::new(MemoryFile::new(vec![0; partition_len]));
 
-            let mut difi =
-                DifiPartition::format(descriptor.clone(), partition.clone(), &param).unwrap();
+            DifiPartition::format(descriptor.clone(), &param).unwrap();
+            let mut difi = DifiPartition::new(descriptor.clone(), partition.clone()).unwrap();
             let init: Vec<u8> = rng.sample_iter(&Standard).take(len).collect();
             difi.write(0, &init).unwrap();
             let plain = MemoryFile::new(init);
 
-            for _ in 0..1000 {
-                let operation = rng.gen_range(1, 10);
-                if operation == 1 {
-                    difi.commit().unwrap();
-                    difi = DifiPartition::new(descriptor.clone(), partition.clone()).unwrap();
-                } else if operation < 4 {
-                    difi.commit().unwrap();
-                } else {
-                    let pos = rng.gen_range(0, len);
-                    let data_len = rng.gen_range(1, len - pos + 1);
-                    if operation < 7 {
-                        let mut a = vec![0; data_len];
-                        let mut b = vec![0; data_len];
-                        difi.read(pos, &mut a).unwrap();
-                        plain.read(pos, &mut b).unwrap();
-                        assert_eq!(a, b);
-                    } else {
-                        let a: Vec<u8> = rng.sample_iter(&Standard).take(data_len).collect();
-                        difi.write(pos, &a).unwrap();
-                        plain.write(pos, &a).unwrap();
-                    }
-                }
-            }
+            crate::random_access_file::fuzzer(
+                &mut difi,
+                |file| file,
+                |file| file.commit().unwrap(),
+                || DifiPartition::new(descriptor.clone(), partition.clone()).unwrap(),
+                &plain,
+                len,
+            );
         }
     }
 

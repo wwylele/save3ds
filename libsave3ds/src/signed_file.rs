@@ -127,30 +127,14 @@ mod test {
             file.read(0, &mut buf).unwrap();
             let plain = MemoryFile::new(buf);
 
-            for _ in 0..1000 {
-                let operation = rng.gen_range(1, 10);
-                if operation == 1 {
-                    file.commit().unwrap();
-                    file = SignedFile::new(signature.clone(), data.clone(), signer.clone(), key)
-                        .unwrap();
-                } else if operation < 4 {
-                    file.commit().unwrap();
-                } else {
-                    let pos = rng.gen_range(0, len);
-                    let data_len = rng.gen_range(1, len - pos + 1);
-                    if operation < 7 {
-                        let mut a = vec![0; data_len];
-                        let mut b = vec![0; data_len];
-                        file.read(pos, &mut a).unwrap();
-                        plain.read(pos, &mut b).unwrap();
-                        assert_eq!(a, b);
-                    } else {
-                        let a: Vec<u8> = rng.sample_iter(&Standard).take(data_len).collect();
-                        file.write(pos, &a).unwrap();
-                        plain.write(pos, &a).unwrap();
-                    }
-                }
-            }
+            crate::random_access_file::fuzzer(
+                &mut file,
+                |file| file,
+                |file| file.commit().unwrap(),
+                || SignedFile::new(signature.clone(), data.clone(), signer.clone(), key).unwrap(),
+                &plain,
+                len,
+            );
         }
     }
 }

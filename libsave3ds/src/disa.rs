@@ -160,36 +160,20 @@ mod test {
         for _ in 0..10 {
             let raw_file = Rc::new(MemoryFile::new(template.to_vec()));
             let mut disa = Disa::new(raw_file.clone(), None).unwrap();
-            let mut partition = &disa[0];
+            let partition = &disa[0];
             let len = partition.len();
             let init: Vec<u8> = rng.sample_iter(&Standard).take(len).collect();
             partition.write(0, &init).unwrap();
             let plain = MemoryFile::new(init);
 
-            for _ in 0..1000 {
-                let operation = rng.gen_range(1, 10);
-                if operation == 1 {
-                    disa.commit().unwrap();
-                    disa = Disa::new(raw_file.clone(), None).unwrap();
-                    partition = &disa[0];
-                } else if operation < 4 {
-                    disa.commit().unwrap();
-                } else {
-                    let pos = rng.gen_range(0, len);
-                    let data_len = rng.gen_range(1, len - pos + 1);
-                    if operation < 7 {
-                        let mut a = vec![0; data_len];
-                        let mut b = vec![0; data_len];
-                        partition.read(pos, &mut a).unwrap();
-                        plain.read(pos, &mut b).unwrap();
-                        assert_eq!(a, b);
-                    } else {
-                        let a: Vec<u8> = rng.sample_iter(&Standard).take(data_len).collect();
-                        partition.write(pos, &a).unwrap();
-                        plain.write(pos, &a).unwrap();
-                    }
-                }
-            }
+            crate::random_access_file::fuzzer(
+                &mut disa,
+                |disa| disa[0].as_ref(),
+                |disa| disa.commit().unwrap(),
+                || Disa::new(raw_file.clone(), None).unwrap(),
+                &plain,
+                len,
+            );
         }
     }
 
