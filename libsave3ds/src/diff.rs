@@ -227,6 +227,31 @@ mod test {
     }
 
     #[test]
+    fn format_size() {
+        let sample = include_str!("extdiffsize.txt");
+
+        for line in sample.split('\n') {
+            if line.is_empty() {
+                continue;
+            }
+            let lr: Vec<_> = line.split(' ').collect();
+            let left = lr[0].parse::<usize>().unwrap();
+            let right = lr[1].parse::<usize>().unwrap();
+            let param = DifiPartitionParam {
+                dpfs_level2_block_len: 128,
+                dpfs_level3_block_len: 4096,
+                ivfc_level1_block_len: 512,
+                ivfc_level2_block_len: 512,
+                ivfc_level3_block_len: 4096,
+                ivfc_level4_block_len: 4096,
+                data_len: left,
+                external_ivfc_level4: true,
+            };
+            assert_eq!(Diff::calculate_size(&param), right);
+        }
+    }
+
+    #[test]
     fn fuzz() {
         use rand::distributions::Standard;
         use rand::prelude::*;
