@@ -207,7 +207,7 @@ impl DifiPartition {
         let ivfc_descriptor_offset = DifiHeader::BYTE_LEN;
         let dpfs_descriptor_offset = ivfc_descriptor_offset + IvfcDescriptor::BYTE_LEN;
         let master_hash_offset = dpfs_descriptor_offset + DpfsDescriptor::BYTE_LEN;
-        let descriptor_len = master_hash_offset + master_hash_len + 4; // extra 4 bytes for padding
+        let descriptor_len = master_hash_offset + master_hash_len;
 
         let difi_header = DifiHeader {
             magic: *b"DIFI",
@@ -238,24 +238,13 @@ impl DifiPartition {
         (info.descriptor_len, info.partition_len)
     }
 
-    pub fn format(
-        descriptor: Rc<RandomAccessFile>,
-        param: &DifiPartitionParam,
-    ) -> Result<(), Error> {
+    pub fn format(descriptor: &RandomAccessFile, param: &DifiPartitionParam) -> Result<(), Error> {
         let info = DifiPartition::calculate_info(param);
         let ivfc_descriptor_offset = info.difi_header.ivfc_descriptor_offset as usize;
         let dpfs_descriptor_offset = info.difi_header.dpfs_descriptor_offset as usize;
-        write_struct(descriptor.as_ref(), 0, info.difi_header)?;
-        write_struct(
-            descriptor.as_ref(),
-            ivfc_descriptor_offset,
-            info.ivfc_descriptor,
-        )?;
-        write_struct(
-            descriptor.as_ref(),
-            dpfs_descriptor_offset,
-            info.dpfs_descriptor,
-        )?;
+        write_struct(descriptor, 0, info.difi_header)?;
+        write_struct(descriptor, ivfc_descriptor_offset, info.ivfc_descriptor)?;
+        write_struct(descriptor, dpfs_descriptor_offset, info.dpfs_descriptor)?;
 
         Ok(())
     }
@@ -469,7 +458,7 @@ mod test {
             let descriptor = Rc::new(MemoryFile::new(vec![0; descriptor_len]));
             let partition = Rc::new(MemoryFile::new(vec![0; partition_len]));
 
-            DifiPartition::format(descriptor.clone(), &param).unwrap();
+            DifiPartition::format(descriptor.as_ref(), &param).unwrap();
             let mut difi = DifiPartition::new(descriptor.clone(), partition.clone()).unwrap();
             let init: Vec<u8> = rng.sample_iter(&Standard).take(len).collect();
             difi.write(0, &init).unwrap();

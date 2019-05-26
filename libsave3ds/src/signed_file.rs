@@ -24,6 +24,26 @@ pub struct SignedFile {
 }
 
 impl SignedFile {
+    pub fn new_unverified(
+        signature: Rc<RandomAccessFile>,
+        data: Rc<RandomAccessFile>,
+        block_provider: Box<Signer>,
+        key: [u8; 16],
+    ) -> Result<SignedFile, Error> {
+        if signature.len() != 16 {
+            return make_error(Error::SizeMismatch);
+        }
+        let len = data.len();
+        let file = SignedFile {
+            signature,
+            data,
+            block_provider,
+            key,
+            len,
+        };
+        Ok(file)
+    }
+
     pub fn new(
         signature: Rc<RandomAccessFile>,
         data: Rc<RandomAccessFile>,
