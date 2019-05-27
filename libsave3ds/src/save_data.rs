@@ -290,6 +290,9 @@ impl FileSystem for SaveDataFileSystem {
     }
 
     fn read(file: &Self::FileType, pos: usize, buf: &mut [u8]) -> Result<(), Error> {
+        if buf.is_empty() {
+            return Ok(());
+        }
         if pos + buf.len() > file.len {
             return make_error(Error::OutOfBound);
         }
@@ -297,6 +300,9 @@ impl FileSystem for SaveDataFileSystem {
     }
 
     fn write(file: &Self::FileType, pos: usize, buf: &[u8]) -> Result<(), Error> {
+        if buf.is_empty() {
+            return Ok(());
+        }
         if pos + buf.len() > file.len {
             return make_error(Error::OutOfBound);
         }

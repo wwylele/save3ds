@@ -15,6 +15,12 @@ use std::ffi::OsStr;
 use std::rc::Rc;
 use time;
 
+enum FileSystemOperation {
+    Mount(bool),
+    Extract,
+    Import,
+}
+
 struct FileSystemFrontend<T: file_system::FileSystem> {
     save: Rc<T::CenterType>,
     fh_map: HashMap<u64, T::FileType>,
@@ -24,16 +30,87 @@ struct FileSystemFrontend<T: file_system::FileSystem> {
     gid: u32,
 }
 
-impl<T: file_system::FileSystem> FileSystemFrontend<T> {
-    fn new(save: Rc<T::CenterType>, read_only: bool, uid: u32, gid: u32) -> FileSystemFrontend<T> {
+impl<T: file_system::FileSystem> FileSystemFrontend<T>
+where
+    T::NameType: NameConvert + Clone,
+{
+    fn new(save: Rc<T::CenterType>, uid: u32, gid: u32) -> FileSystemFrontend<T> {
         FileSystemFrontend::<T> {
             save,
             fh_map: HashMap::new(),
             next_fh: 1,
-            read_only,
+            read_only: true,
             uid,
             gid,
         }
+    }
+
+    fn extract_impl(
+        &self,
+        dir: T::DirType,
+        path: &std::path::Path,
+        indent: u32,
+    ) -> Result<(), Error> {
+        if !path.exists() {
+            std::fs::create_dir(path)?;
+        }
+
+        for (name, ino) in T::list_sub_dir(&dir)? {
+            let name = T::NameType::name_3ds_to_str(&name);
+            for _ in 0..indent {
+                print!(" ");
+            }
+            println!("+{}", &name);
+            let dir = T::dir_open_ino(self.save.clone(), ino)?;
+            self.extract_impl(dir, &path.join(name), indent + 1)?;
+        }
+
+        for (name, ino) in T::list_sub_file(&dir)? {
+            let name = T::NameType::name_3ds_to_str(&name);
+            for _ in 0..indent {
+                print!(" ");
+            }
+            println!("-{}", &name);
+            let file = T::file_open_ino(self.save.clone(), ino)?;
+            let mut buffer = vec![0; T::len(&file)];
+            match T::read(&file, 0, &mut buffer) {
+                Ok(()) | Err(Error::HashMismatch) => (),
+                e => return e,
+            }
+            std::fs::write(&path.join(name), &buffer)?;
+        }
+
+        Ok(())
+    }
+
+    fn extract(&self, mountpoint: &std::path::Path) -> Result<(), Error> {
+        println!("Extracting...");
+        let root = T::open_root(self.save.clone())?;
+        self.extract_impl(root, mountpoint, 0)?;
+        println!("Finished");
+        Ok(())
+    }
+
+    fn import(&self, _mountpoint: &std::path::Path) -> Result<(), Error> {
+        println!("Not implemented!");
+        Ok(())
+    }
+
+    fn start(
+        mut self,
+        operation: FileSystemOperation,
+        mountpoint: &std::path::Path,
+    ) -> Result<(), Error> {
+        match operation {
+            FileSystemOperation::Mount(read_only) => {
+                self.read_only = read_only;
+                mount(self, &mountpoint, &[])?;
+            }
+            FileSystemOperation::Extract => self.extract(mountpoint)?,
+            FileSystemOperation::Import => self.import(mountpoint)?,
+        }
+
+        Ok(())
     }
 }
 
@@ -834,6 +911,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
     let mut opts = Options::new();
     opts.optopt("b", "boot9", "boot9.bin file path", "DIR");
     opts.optflag("h", "help", "print this help menu");
+    opts.optflag("i", "import", "import the content instead of mounting");
     opts.optopt("m", "movable", "movable.sed file path", "FILE");
     opts.optflag("r", "readonly", "mount as read-only file system");
     opts.optopt("", "bare", "mount a bare DISA file", "FILE");
@@ -851,6 +929,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
     opts.optopt("", "nandext", "mount the NAND Extdata with the ID", "ID");
     opts.optopt("", "nandsave", "mount the NAND save with the ID", "ID");
     opts.optopt("o", "otp", "OTP file path", "FILE");
+    opts.optflag("x", "extract", "extract the content instead of mounting");
 
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
@@ -885,6 +964,20 @@ fn main() -> Result<(), Box<std::error::Error>> {
     let nand_save_id = matches.opt_str("nandsave");
     let db_type = matches.opt_str("db");
 
+    let read_only = matches.opt_present("r") || matches.opt_present("extract");
+
+    let operation = if matches.opt_present("extract") {
+        if matches.opt_present("import") {
+            println!("--extract and --import at the same time not allowed");
+            return Ok(());
+        }
+        FileSystemOperation::Extract
+    } else if matches.opt_present("import") {
+        FileSystemOperation::Import
+    } else {
+        FileSystemOperation::Mount(read_only)
+    };
+
     if [
         &sd_save_id,
         &sd_ext_id,
@@ -907,72 +1000,53 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
     let resource = Resource::new(boot9_path, movable_path, sd_path, nand_path, otp_path)?;
 
-    let read_only = matches.opt_present("r");
-    let options = [];
-
     if let Some(bare) = bare_path {
         println!(
             "WARNING: After modification, you need to sign the CMAC header using other tools."
         );
 
-        mount(
-            FileSystemFrontend::<SaveDataFileSystem>::new(
-                resource.open_bare_save(&bare, !read_only)?,
-                read_only,
-                uid,
-                gid,
-            ),
-            &mountpoint,
-            &options,
-        )?;
+        FileSystemFrontend::<SaveDataFileSystem>::new(
+            resource.open_bare_save(&bare, !read_only)?,
+            uid,
+            gid,
+        )
+        .start(operation, mountpoint)?
     } else if let Some(id) = nand_save_id {
         let id = u32::from_str_radix(&id, 16)?;
-        mount(
-            FileSystemFrontend::<SaveDataFileSystem>::new(
-                resource.open_nand_save(id, !read_only)?,
-                read_only,
-                uid,
-                gid,
-            ),
-            &mountpoint,
-            &options,
-        )?;
+
+        FileSystemFrontend::<SaveDataFileSystem>::new(
+            resource.open_nand_save(id, !read_only)?,
+            uid,
+            gid,
+        )
+        .start(operation, mountpoint)?
     } else if let Some(id) = sd_save_id {
         let id = u64::from_str_radix(&id, 16)?;
-        mount(
-            FileSystemFrontend::<SaveDataFileSystem>::new(
-                resource.open_sd_save(id, !read_only)?,
-                read_only,
-                uid,
-                gid,
-            ),
-            &mountpoint,
-            &options,
-        )?;
+
+        FileSystemFrontend::<SaveDataFileSystem>::new(
+            resource.open_sd_save(id, !read_only)?,
+            uid,
+            gid,
+        )
+        .start(operation, mountpoint)?
     } else if let Some(id) = sd_ext_id {
         let id = u64::from_str_radix(&id, 16)?;
-        mount(
-            FileSystemFrontend::<ExtDataFileSystem>::new(
-                resource.open_sd_ext(id, !read_only)?,
-                read_only,
-                uid,
-                gid,
-            ),
-            &mountpoint,
-            &options,
-        )?;
+
+        FileSystemFrontend::<ExtDataFileSystem>::new(
+            resource.open_sd_ext(id, !read_only)?,
+            uid,
+            gid,
+        )
+        .start(operation, mountpoint)?
     } else if let Some(id) = nand_ext_id {
         let id = u64::from_str_radix(&id, 16)?;
-        mount(
-            FileSystemFrontend::<ExtDataFileSystem>::new(
-                resource.open_nand_ext(id, !read_only)?,
-                read_only,
-                uid,
-                gid,
-            ),
-            &mountpoint,
-            &options,
-        )?;
+
+        FileSystemFrontend::<ExtDataFileSystem>::new(
+            resource.open_nand_ext(id, !read_only)?,
+            uid,
+            gid,
+        )
+        .start(operation, mountpoint)?
     } else if let Some(db_type) = db_type {
         let db_type = match db_type.as_ref() {
             "nandtitle" => DbType::NandTitle,
@@ -987,16 +1061,9 @@ fn main() -> Result<(), Box<std::error::Error>> {
                 return Ok(());
             }
         };
-        mount(
-            FileSystemFrontend::<DbFileSystem>::new(
-                resource.open_db(db_type, !read_only)?,
-                read_only,
-                uid,
-                gid,
-            ),
-            &mountpoint,
-            &options,
-        )?;
+
+        FileSystemFrontend::<DbFileSystem>::new(resource.open_db(db_type, !read_only)?, uid, gid)
+            .start(operation, mountpoint)?
     } else {
         panic!()
     };

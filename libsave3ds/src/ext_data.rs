@@ -301,10 +301,16 @@ impl FileSystem for ExtDataFileSystem {
     }
 
     fn read(file: &Self::FileType, pos: usize, buf: &mut [u8]) -> Result<(), Error> {
+        if buf.is_empty() {
+            return Ok(());
+        }
         file.data.partition().read(pos, buf)
     }
 
     fn write(file: &Self::FileType, pos: usize, buf: &[u8]) -> Result<(), Error> {
+        if buf.is_empty() {
+            return Ok(());
+        }
         file.data.partition().write(pos, buf)
     }
 
