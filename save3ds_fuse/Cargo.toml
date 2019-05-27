@@ -4,10 +4,15 @@ version = "0.1.0"
 authors = ["Weiyi Wang <wwylele@gmail.com>"]
 edition = "2018"
 
+[features]
+default = ["unixfuse"]
+unixfuse = ["libc", "fuse", "time"]
+
 [dependencies]
 libsave3ds = { path = "../libsave3ds" }
-libc = "0.2.54"
-fuse = "0.3.1"
-time = "0.1.42"
 getopts = "0.2"
-sha2 = "0.8.0"
+
+[target.'cfg(unix)'.dependencies]
+libc = { version = "0.2.54", optional = true }
+fuse = { version = "0.3.1", optional = true }
+time = { version = "0.1.42", optional = true }

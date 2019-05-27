@@ -1,9 +1,4 @@
-use fuse::*;
 use getopts::Options;
-use libc::{
-    getegid, geteuid, EBADF, EEXIST, EIO, EISDIR, ENAMETOOLONG, ENOENT, ENOSPC, ENOSYS, ENOTDIR,
-    ENOTEMPTY, EROFS,
-};
 use libsave3ds::db::*;
 use libsave3ds::error::*;
 use libsave3ds::ext_data::*;
@@ -13,7 +8,16 @@ use libsave3ds::Resource;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::rc::Rc;
-use time;
+
+#[cfg(all(unix, feature = "unixfuse"))]
+use {
+    fuse::*,
+    libc::{
+        getegid, geteuid, EBADF, EEXIST, EIO, EISDIR, ENAMETOOLONG, ENOENT, ENOSPC, ENOSYS,
+        ENOTDIR, ENOTEMPTY, EROFS,
+    },
+    time,
+};
 
 enum FileSystemOperation {
     Mount(bool),
@@ -21,11 +25,12 @@ enum FileSystemOperation {
     Import,
 }
 
+#[allow(unused)]
 struct FileSystemFrontend<T: file_system::FileSystem> {
     save: Rc<T::CenterType>,
+    read_only: bool,
     fh_map: HashMap<u64, T::FileType>,
     next_fh: u64,
-    read_only: bool,
     uid: u32,
     gid: u32,
 }
@@ -34,14 +39,14 @@ impl<T: file_system::FileSystem> FileSystemFrontend<T>
 where
     T::NameType: NameConvert + Clone,
 {
-    fn new(save: Rc<T::CenterType>, uid: u32, gid: u32) -> FileSystemFrontend<T> {
+    fn new(save: Rc<T::CenterType>) -> FileSystemFrontend<T> {
         FileSystemFrontend::<T> {
             save,
             fh_map: HashMap::new(),
             next_fh: 1,
             read_only: true,
-            uid,
-            gid,
+            uid: 0,
+            gid: 0,
         }
     }
 
@@ -96,16 +101,25 @@ where
         Ok(())
     }
 
+    #[allow(unreachable_code, unused_variables, unused_mut)]
+    fn mount(mut self, read_only: bool, mountpoint: &std::path::Path) -> Result<(), Error> {
+        #[cfg(all(unix, feature = "unixfuse"))]
+        {
+            self.read_only = read_only;
+            mount(self, &mountpoint, &[])?;
+            return Ok(());
+        }
+        println!("fuse not implemented. Please specify --extract or --import flag");
+        Ok(())
+    }
+
     fn start(
-        mut self,
+        self,
         operation: FileSystemOperation,
         mountpoint: &std::path::Path,
     ) -> Result<(), Error> {
         match operation {
-            FileSystemOperation::Mount(read_only) => {
-                self.read_only = read_only;
-                mount(self, &mountpoint, &[])?;
-            }
+            FileSystemOperation::Mount(read_only) => self.mount(read_only, mountpoint)?,
             FileSystemOperation::Extract => self.extract(mountpoint)?,
             FileSystemOperation::Import => self.import(mountpoint)?,
         }
@@ -114,6 +128,7 @@ where
     }
 }
 
+#[cfg(all(unix, feature = "unixfuse"))]
 fn make_dir_attr(read_only: bool, uid: u32, gid: u32, ino: u64, sub_file_count: usize) -> FileAttr {
     FileAttr {
         ino,
@@ -133,6 +148,7 @@ fn make_dir_attr(read_only: bool, uid: u32, gid: u32, ino: u64, sub_file_count: 
     }
 }
 
+#[cfg(all(unix, feature = "unixfuse"))]
 fn make_file_attr(read_only: bool, uid: u32, gid: u32, ino: u64, file_size: usize) -> FileAttr {
     FileAttr {
         ino,
@@ -244,11 +260,13 @@ impl NameConvert for [u8; 16] {
     }
 }
 
+#[cfg(all(unix, feature = "unixfuse"))]
 enum Ino {
     Dir(u32),
     File(u32),
 }
 
+#[cfg(all(unix, feature = "unixfuse"))]
 impl Ino {
     fn to_os(&self) -> u64 {
         match *self {
@@ -275,11 +293,15 @@ impl<T: file_system::FileSystem> Drop for FileSystemFrontend<T> {
     }
 }
 
+#[cfg(all(unix, feature = "unixfuse"))]
 impl<T: file_system::FileSystem> Filesystem for FileSystemFrontend<T>
 where
     T::NameType: NameConvert + Clone,
 {
     fn init(&mut self, _req: &Request) -> Result<(), i32> {
+        let (uid, gid) = unsafe { (geteuid(), getegid()) };
+        self.uid = uid;
+        self.gid = gid;
         println!("Initialized");
         Ok(())
     }
@@ -903,8 +925,6 @@ fn print_usage(program: &str, opts: Options) {
 }
 
 fn main() -> Result<(), Box<std::error::Error>> {
-    let (uid, gid) = unsafe { (geteuid(), getegid()) };
-
     let args: Vec<String> = std::env::args().collect();
     let program = args[0].clone();
 
@@ -1005,48 +1025,28 @@ fn main() -> Result<(), Box<std::error::Error>> {
             "WARNING: After modification, you need to sign the CMAC header using other tools."
         );
 
-        FileSystemFrontend::<SaveDataFileSystem>::new(
-            resource.open_bare_save(&bare, !read_only)?,
-            uid,
-            gid,
-        )
-        .start(operation, mountpoint)?
+        FileSystemFrontend::<SaveDataFileSystem>::new(resource.open_bare_save(&bare, !read_only)?)
+            .start(operation, mountpoint)?
     } else if let Some(id) = nand_save_id {
         let id = u32::from_str_radix(&id, 16)?;
 
-        FileSystemFrontend::<SaveDataFileSystem>::new(
-            resource.open_nand_save(id, !read_only)?,
-            uid,
-            gid,
-        )
-        .start(operation, mountpoint)?
+        FileSystemFrontend::<SaveDataFileSystem>::new(resource.open_nand_save(id, !read_only)?)
+            .start(operation, mountpoint)?
     } else if let Some(id) = sd_save_id {
         let id = u64::from_str_radix(&id, 16)?;
 
-        FileSystemFrontend::<SaveDataFileSystem>::new(
-            resource.open_sd_save(id, !read_only)?,
-            uid,
-            gid,
-        )
-        .start(operation, mountpoint)?
+        FileSystemFrontend::<SaveDataFileSystem>::new(resource.open_sd_save(id, !read_only)?)
+            .start(operation, mountpoint)?
     } else if let Some(id) = sd_ext_id {
         let id = u64::from_str_radix(&id, 16)?;
 
-        FileSystemFrontend::<ExtDataFileSystem>::new(
-            resource.open_sd_ext(id, !read_only)?,
-            uid,
-            gid,
-        )
-        .start(operation, mountpoint)?
+        FileSystemFrontend::<ExtDataFileSystem>::new(resource.open_sd_ext(id, !read_only)?)
+            .start(operation, mountpoint)?
     } else if let Some(id) = nand_ext_id {
         let id = u64::from_str_radix(&id, 16)?;
 
-        FileSystemFrontend::<ExtDataFileSystem>::new(
-            resource.open_nand_ext(id, !read_only)?,
-            uid,
-            gid,
-        )
-        .start(operation, mountpoint)?
+        FileSystemFrontend::<ExtDataFileSystem>::new(resource.open_nand_ext(id, !read_only)?)
+            .start(operation, mountpoint)?
     } else if let Some(db_type) = db_type {
         let db_type = match db_type.as_ref() {
             "nandtitle" => DbType::NandTitle,
@@ -1062,7 +1062,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
             }
         };
 
-        FileSystemFrontend::<DbFileSystem>::new(resource.open_db(db_type, !read_only)?, uid, gid)
+        FileSystemFrontend::<DbFileSystem>::new(resource.open_db(db_type, !read_only)?)
             .start(operation, mountpoint)?
     } else {
         panic!()
