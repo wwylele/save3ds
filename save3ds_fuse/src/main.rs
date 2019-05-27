@@ -1,7 +1,8 @@
 use fuse::*;
 use getopts::Options;
 use libc::{
-    EBADF, EEXIST, EIO, EISDIR, ENAMETOOLONG, ENOENT, ENOSPC, ENOSYS, ENOTDIR, ENOTEMPTY, EROFS,
+    getegid, geteuid, EBADF, EEXIST, EIO, EISDIR, ENAMETOOLONG, ENOENT, ENOSPC, ENOSYS, ENOTDIR,
+    ENOTEMPTY, EROFS,
 };
 use libsave3ds::db::*;
 use libsave3ds::error::*;
@@ -19,54 +20,58 @@ struct FileSystemFrontend<T: file_system::FileSystem> {
     fh_map: HashMap<u64, T::FileType>,
     next_fh: u64,
     read_only: bool,
+    uid: u32,
+    gid: u32,
 }
 
 impl<T: file_system::FileSystem> FileSystemFrontend<T> {
-    fn new(save: Rc<T::CenterType>, read_only: bool) -> FileSystemFrontend<T> {
+    fn new(save: Rc<T::CenterType>, read_only: bool, uid: u32, gid: u32) -> FileSystemFrontend<T> {
         FileSystemFrontend::<T> {
             save,
             fh_map: HashMap::new(),
             next_fh: 1,
             read_only,
+            uid,
+            gid,
         }
     }
+}
 
-    fn make_dir_attr(read_only: bool, ino: u64, sub_file_count: usize) -> FileAttr {
-        FileAttr {
-            ino,
-            size: 0,
-            blocks: 0,
-            atime: time::Timespec::new(0, 0),
-            mtime: time::Timespec::new(0, 0),
-            ctime: time::Timespec::new(0, 0),
-            crtime: time::Timespec::new(0, 0),
-            kind: FileType::Directory,
-            perm: if read_only { 0o555 } else { 0o777 },
-            nlink: 2 + sub_file_count as u32,
-            uid: 501,
-            gid: 20,
-            rdev: 0,
-            flags: 0,
-        }
+fn make_dir_attr(read_only: bool, uid: u32, gid: u32, ino: u64, sub_file_count: usize) -> FileAttr {
+    FileAttr {
+        ino,
+        size: 0,
+        blocks: 0,
+        atime: time::Timespec::new(0, 0),
+        mtime: time::Timespec::new(0, 0),
+        ctime: time::Timespec::new(0, 0),
+        crtime: time::Timespec::new(0, 0),
+        kind: FileType::Directory,
+        perm: if read_only { 0o555 } else { 0o755 },
+        nlink: 2 + sub_file_count as u32,
+        uid: uid,
+        gid: gid,
+        rdev: 0,
+        flags: 0,
     }
+}
 
-    fn make_file_attr(read_only: bool, ino: u64, file_size: usize) -> FileAttr {
-        FileAttr {
-            ino,
-            size: file_size as u64,
-            blocks: 1,
-            atime: time::Timespec::new(0, 0),
-            mtime: time::Timespec::new(0, 0),
-            ctime: time::Timespec::new(0, 0),
-            crtime: time::Timespec::new(0, 0),
-            kind: FileType::RegularFile,
-            perm: if read_only { 0o444 } else { 0o666 },
-            nlink: 1,
-            uid: 501,
-            gid: 20,
-            rdev: 0,
-            flags: 0,
-        }
+fn make_file_attr(read_only: bool, uid: u32, gid: u32, ino: u64, file_size: usize) -> FileAttr {
+    FileAttr {
+        ino,
+        size: file_size as u64,
+        blocks: 1,
+        atime: time::Timespec::new(0, 0),
+        mtime: time::Timespec::new(0, 0),
+        ctime: time::Timespec::new(0, 0),
+        crtime: time::Timespec::new(0, 0),
+        kind: FileType::RegularFile,
+        perm: if read_only { 0o444 } else { 0o644 },
+        nlink: 1,
+        uid: uid,
+        gid: gid,
+        rdev: 0,
+        flags: 0,
     }
 }
 
@@ -232,8 +237,10 @@ where
 
                     reply.entry(
                         &time::Timespec::new(1, 0),
-                        &Self::make_dir_attr(
+                        &make_dir_attr(
                             self.read_only,
+                            self.uid,
+                            self.gid,
                             Ino::Dir(T::dir_get_ino(&child)).to_os(),
                             children_len,
                         ),
@@ -244,8 +251,10 @@ where
                 if let Ok(child) = T::open_sub_file(&parent_dir, name_converted) {
                     reply.entry(
                         &time::Timespec::new(1, 0),
-                        &Self::make_file_attr(
+                        &make_file_attr(
                             self.read_only,
+                            self.uid,
+                            self.gid,
                             Ino::File(T::file_get_ino(&child)).to_os(),
                             T::len(&child),
                         ),
@@ -264,8 +273,10 @@ where
                 if let Ok(file) = T::file_open_ino(self.save.clone(), ino) {
                     reply.attr(
                         &time::Timespec::new(1, 0),
-                        &Self::make_file_attr(
+                        &make_file_attr(
                             self.read_only,
+                            self.uid,
+                            self.gid,
                             Ino::File(T::file_get_ino(&file)).to_os(),
                             T::len(&file),
                         ),
@@ -284,8 +295,10 @@ where
                     };
                     reply.attr(
                         &time::Timespec::new(1, 0),
-                        &Self::make_dir_attr(
+                        &make_dir_attr(
                             self.read_only,
+                            self.uid,
+                            self.gid,
                             Ino::Dir(T::dir_get_ino(&dir)).to_os(),
                             children_len,
                         ),
@@ -347,8 +360,10 @@ where
                     match T::resize(file, size as usize) {
                         Ok(()) => reply.attr(
                             &time::Timespec::new(1, 0),
-                            &Self::make_file_attr(
+                            &make_file_attr(
                                 self.read_only,
+                                self.uid,
+                                self.gid,
                                 Ino::File(T::file_get_ino(&file)).to_os(),
                                 T::len(&file),
                             ),
@@ -386,8 +401,10 @@ where
                 match T::new_sub_dir(&parent_dir, name_converted) {
                     Ok(child) => reply.entry(
                         &time::Timespec::new(1, 0),
-                        &Self::make_dir_attr(
+                        &make_dir_attr(
                             self.read_only,
+                            self.uid,
+                            self.gid,
                             Ino::Dir(T::dir_get_ino(&child)).to_os(),
                             0,
                         ),
@@ -437,8 +454,10 @@ where
                 match T::new_sub_file(&parent_dir, name_converted, size) {
                     Ok(child) => reply.entry(
                         &time::Timespec::new(1, 0),
-                        &Self::make_file_attr(
+                        &make_file_attr(
                             self.read_only,
+                            self.uid,
+                            self.gid,
                             Ino::File(T::file_get_ino(&child)).to_os(),
                             0,
                         ),
@@ -807,6 +826,8 @@ fn print_usage(program: &str, opts: Options) {
 }
 
 fn main() -> Result<(), Box<std::error::Error>> {
+    let (uid, gid) = unsafe { (geteuid(), getegid()) };
+
     let args: Vec<String> = std::env::args().collect();
     let program = args[0].clone();
 
@@ -898,6 +919,8 @@ fn main() -> Result<(), Box<std::error::Error>> {
             FileSystemFrontend::<SaveDataFileSystem>::new(
                 resource.open_bare_save(&bare, !read_only)?,
                 read_only,
+                uid,
+                gid,
             ),
             &mountpoint,
             &options,
@@ -908,6 +931,8 @@ fn main() -> Result<(), Box<std::error::Error>> {
             FileSystemFrontend::<SaveDataFileSystem>::new(
                 resource.open_nand_save(id, !read_only)?,
                 read_only,
+                uid,
+                gid,
             ),
             &mountpoint,
             &options,
@@ -918,6 +943,8 @@ fn main() -> Result<(), Box<std::error::Error>> {
             FileSystemFrontend::<SaveDataFileSystem>::new(
                 resource.open_sd_save(id, !read_only)?,
                 read_only,
+                uid,
+                gid,
             ),
             &mountpoint,
             &options,
@@ -928,6 +955,8 @@ fn main() -> Result<(), Box<std::error::Error>> {
             FileSystemFrontend::<ExtDataFileSystem>::new(
                 resource.open_sd_ext(id, !read_only)?,
                 read_only,
+                uid,
+                gid,
             ),
             &mountpoint,
             &options,
@@ -938,6 +967,8 @@ fn main() -> Result<(), Box<std::error::Error>> {
             FileSystemFrontend::<ExtDataFileSystem>::new(
                 resource.open_nand_ext(id, !read_only)?,
                 read_only,
+                uid,
+                gid,
             ),
             &mountpoint,
             &options,
@@ -960,6 +991,8 @@ fn main() -> Result<(), Box<std::error::Error>> {
             FileSystemFrontend::<DbFileSystem>::new(
                 resource.open_db(db_type, !read_only)?,
                 read_only,
+                uid,
+                gid,
             ),
             &mountpoint,
             &options,
