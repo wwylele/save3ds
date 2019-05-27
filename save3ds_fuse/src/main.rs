@@ -7,6 +7,7 @@ use libsave3ds::save_data::*;
 use libsave3ds::Resource;
 use std::collections::HashMap;
 use std::ffi::OsStr;
+use std::io::Read;
 use std::rc::Rc;
 
 #[cfg(all(unix, feature = "unixfuse"))]
@@ -96,8 +97,65 @@ where
         Ok(())
     }
 
-    fn import(&self, _mountpoint: &std::path::Path) -> Result<(), Error> {
-        println!("Not implemented!");
+    fn clear_impl(&self, dir: &T::DirType) -> Result<(), Error> {
+        for (_, ino) in T::list_sub_dir(&dir)? {
+            let dir = T::dir_open_ino(self.save.clone(), ino)?;
+            self.clear_impl(&dir)?;
+            T::dir_delete(dir)?;
+        }
+
+        for (_, ino) in T::list_sub_file(&dir)? {
+            let file = T::file_open_ino(self.save.clone(), ino)?;
+            T::file_delete(file)?;
+        }
+
+        Ok(())
+    }
+
+    fn import_impl(&self, dir: &T::DirType, path: &std::path::Path) -> Result<(), Error> {
+        for entry in std::fs::read_dir(&path)? {
+            let entry = entry?;
+            println!("{:?}", entry.path());
+            let name = if let Some(name) = entry
+                .path()
+                .file_name()
+                .and_then(OsStr::to_str)
+                .and_then(T::NameType::name_str_to_3ds)
+            {
+                name
+            } else {
+                println!("Name not valid: {:?}", entry.path());
+                continue;
+            };
+
+            let file_type = entry.file_type()?;
+            if file_type.is_dir() {
+                let dir = T::new_sub_dir(&dir, name)?;
+                self.import_impl(&dir, &entry.path())?
+            } else if file_type.is_file() {
+                let mut host_file = std::fs::File::open(&entry.path())?;
+                let len = host_file.metadata()?.len() as usize;
+                let file = T::new_sub_file(&dir, name, len)?;
+                let mut buffer = vec![0; len];
+                host_file.read_exact(&mut buffer)?;
+                T::write(&file, 0, &buffer)?;
+                T::commit_file(&file)?;
+            } else {
+                println!("Unrecognized file type: {:?}", entry.path());
+            }
+        }
+
+        Ok(())
+    }
+
+    fn import(&self, mountpoint: &std::path::Path) -> Result<(), Error> {
+        println!("Clearing the original contents...");
+        let root = T::open_root(self.save.clone())?;
+        self.clear_impl(&root)?;
+        println!("Importing new contents...");
+        self.import_impl(&root, mountpoint)?;
+        T::commit(&self.save)?;
+        println!("Finished");
         Ok(())
     }
 
