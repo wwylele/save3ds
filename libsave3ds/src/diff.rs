@@ -81,6 +81,7 @@ impl Diff {
         param: &DifiPartitionParam,
         unique_id: u64,
     ) -> Result<(), Error> {
+        file.write(0, &[0; 0x200])?;
         let header_file_bare = Rc::new(SubFile::new(file.clone(), 0x100, 0x100)?);
         let header_file: Rc<RandomAccessFile> = match signer {
             None => header_file_bare,
