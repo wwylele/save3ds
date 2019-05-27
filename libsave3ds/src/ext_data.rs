@@ -418,6 +418,10 @@ impl FileSystem for ExtDataFileSystem {
     fn commit(center: &Self::CenterType) -> Result<(), Error> {
         center.meta_file.commit()
     }
+
+    fn commit_file(file: &Self::FileType) -> Result<(), Error> {
+        file.data.commit()
+    }
 }
 
 #[cfg(test)]

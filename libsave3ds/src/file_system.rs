@@ -99,6 +99,10 @@ pub trait FileSystem {
     }
 
     fn commit(center: &Self::CenterType) -> Result<(), Error> {
-        make_error(Error::Unsupported)
+        Ok(())
+    }
+
+    fn commit_file(file: &Self::FileType) -> Result<(), Error> {
+        Ok(())
     }
 }

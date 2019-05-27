@@ -120,9 +120,9 @@ impl Diff {
             info.table_size,
         )?);
 
-        DifiPartition::format(table.as_ref(), param);
-        table.commit();
-        header_file.commit();
+        DifiPartition::format(table.as_ref(), param)?;
+        table.commit()?;
+        header_file.commit()?;
         Ok(())
     }
 

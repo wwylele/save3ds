@@ -553,7 +553,13 @@ where
         _flush: bool,
         reply: ReplyEmpty,
     ) {
-        self.fh_map.remove(&fh);
+        if let Some(file) = self.fh_map.remove(&fh) {
+            if !self.read_only {
+                if let Err(e) = T::commit_file(&file) {
+                    println!("Failed to save file: {}", e);
+                }
+            }
+        }
         reply.ok();
     }
 
