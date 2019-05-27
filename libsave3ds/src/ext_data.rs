@@ -1,4 +1,5 @@
 use crate::diff::Diff;
+use crate::difi_partition::DifiPartitionParam;
 use crate::error::*;
 use crate::fat::*;
 use crate::file_system::*;
@@ -34,6 +35,7 @@ type FsMeta = fs_meta::FsMeta<SaveExtKey, SaveExtDir, SaveExtKey, ExtFile>;
 type DirMeta = fs_meta::DirMeta<SaveExtKey, SaveExtDir, SaveExtKey, ExtFile>;
 type FileMeta = fs_meta::FileMeta<SaveExtKey, SaveExtDir, SaveExtKey, ExtFile>;
 
+#[derive(Clone)]
 pub struct ExtSigner {
     pub id: u64,
     pub sub_id: Option<u64>,
@@ -172,7 +174,11 @@ pub struct File {
 }
 
 impl File {
-    fn from_meta(center: Rc<ExtData>, meta: FileMeta) -> Result<File, Error> {
+    fn from_meta(
+        center: Rc<ExtData>,
+        meta: FileMeta,
+        new: Option<(usize, u64)>,
+    ) -> Result<File, Error> {
         let file_index = meta.get_ino() + 1;
         let id_high = format!("{:08x}", center.id >> 32);
         let id_low = format!("{:08x}", center.id & 0xFFFF_FFFF);
@@ -190,16 +196,39 @@ impl File {
                     .map(|s| s as &str),
             )
             .collect();
-        let data = Diff::new(
-            center.sd_nand.open(&path, center.write)?,
-            Some((
-                Box::new(ExtSigner {
-                    id: center.id,
-                    sub_id: Some((u64::from(fid_high) << 32) | u64::from(fid_low)),
-                }),
-                center.key,
-            )),
-        )?;
+
+        let mut param = None;
+        if let Some((len, _)) = new {
+            param = Some(DifiPartitionParam {
+                dpfs_level2_block_len: 128,
+                dpfs_level3_block_len: 4096,
+                ivfc_level1_block_len: 512,
+                ivfc_level2_block_len: 512,
+                ivfc_level3_block_len: 4096,
+                ivfc_level4_block_len: 4096,
+                data_len: len,
+                external_ivfc_level4: true,
+            });
+            center
+                .sd_nand
+                .create(&path, Diff::calculate_size(param.as_ref().unwrap()))?
+        }
+        let file = center.sd_nand.open(&path, center.write)?;
+        let signer = Box::new(ExtSigner {
+            id: center.id,
+            sub_id: Some((u64::from(fid_high) << 32) | u64::from(fid_low)),
+        });
+
+        if let Some((_, unique_id)) = new {
+            Diff::format(
+                file.clone(),
+                Some((signer.clone(), center.key)),
+                param.as_ref().unwrap(),
+                unique_id,
+            )?;
+        }
+
+        let data = Diff::new(file, Some((signer, center.key)))?;
 
         let info = meta.get_info()?;
         if info.unique_id != data.unique_id() {
@@ -210,7 +239,7 @@ impl File {
 
     pub fn open_ino(center: Rc<ExtData>, ino: u32) -> Result<File, Error> {
         let meta = FileMeta::open_ino(center.fs.clone(), ino)?;
-        File::from_meta(center, meta)
+        File::from_meta(center, meta, None)
     }
 }
 
@@ -228,7 +257,7 @@ impl FileSystem for ExtDataFileSystem {
 
     fn file_open_ino(center: Rc<Self::CenterType>, ino: u32) -> Result<Self::FileType, Error> {
         let meta = FileMeta::open_ino(center.fs.clone(), ino)?;
-        File::from_meta(center, meta)
+        File::from_meta(center, meta, None)
     }
 
     fn file_rename(
@@ -245,6 +274,30 @@ impl FileSystem for ExtDataFileSystem {
 
     fn file_get_ino(file: &Self::FileType) -> u32 {
         file.meta.get_ino()
+    }
+
+    fn file_delete(file: Self::FileType) -> Result<(), Error> {
+        let file_index = file.meta.get_ino() + 1;
+        let id_high = format!("{:08x}", file.center.id >> 32);
+        let id_low = format!("{:08x}", file.center.id & 0xFFFF_FFFF);
+        let fid_high = file_index / 126;
+        let fid_low = file_index % 126;
+        let fid_high_s = format!("{:08x}", fid_high);
+        let fid_low_s = format!("{:08x}", fid_low);
+        let path: Vec<&str> = file
+            .center
+            .base_path
+            .iter()
+            .map(|s| s as &str)
+            .chain(
+                [&id_high, &id_low, &fid_high_s, &fid_low_s]
+                    .iter()
+                    .map(|s| s as &str),
+            )
+            .collect();
+
+        file.center.sd_nand.remove(&path)?;
+        file.meta.delete()
     }
 
     fn read(file: &Self::FileType, pos: usize, buf: &mut [u8]) -> Result<(), Error> {
@@ -296,7 +349,7 @@ impl FileSystem for ExtDataFileSystem {
     }
 
     fn open_sub_file(dir: &Self::DirType, name: [u8; 16]) -> Result<Self::FileType, Error> {
-        File::from_meta(dir.center.clone(), dir.meta.open_sub_file(name)?)
+        File::from_meta(dir.center.clone(), dir.meta.open_sub_file(name)?, None)
     }
 
     fn list_sub_dir(dir: &Self::DirType) -> Result<Vec<([u8; 16], u32)>, Error> {
@@ -321,6 +374,41 @@ impl FileSystem for ExtDataFileSystem {
             center: dir.center.clone(),
             meta: dir.meta.new_sub_dir(name, dir_info)?,
         })
+    }
+
+    fn new_sub_file(
+        dir: &Self::DirType,
+        name: [u8; 16],
+        len: usize,
+    ) -> Result<Self::FileType, Error> {
+        if Self::open_sub_file(dir, name).is_ok() || Self::open_sub_dir(dir, name).is_ok() {
+            return make_error(Error::AlreadyExist);
+        }
+        if len == 0 {
+            return make_error(Error::InvalidValue);
+        }
+        let unique_id = 0xDEAD_BEEF;
+        let meta = dir.meta.new_sub_file(
+            name,
+            ExtFile {
+                next: 0,
+                padding1: 0,
+                block: 0x8000_0000,
+                unique_id,
+                padding2: 0,
+            },
+        )?;
+        match File::from_meta(
+            dir.center.clone(),
+            dir.meta.open_sub_file(name)?,
+            Some((len, unique_id)),
+        ) {
+            Ok(file) => Ok(file),
+            Err(e) => {
+                meta.delete()?;
+                Err(e)
+            }
+        }
     }
 
     fn dir_delete(dir: Self::DirType) -> Result<(), Error> {

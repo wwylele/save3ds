@@ -61,4 +61,17 @@ impl SdNandFileSystem for Sd {
 
         Ok(Rc::new(AesCtrFile::new(file, self.key, ctr)))
     }
+
+    fn create(&self, path: &[&str], len: usize) -> Result<(), Error> {
+        let file_path = path.iter().fold(self.path.clone(), |a, b| a.join(b));
+        let f = std::fs::File::create(file_path)?;
+        f.set_len(len as u64)?;
+        Ok(())
+    }
+
+    fn remove(&self, path: &[&str]) -> Result<(), Error> {
+        let file_path = path.iter().fold(self.path.clone(), |a, b| a.join(b));
+        std::fs::remove_file(file_path)?;
+        Ok(())
+    }
 }
