@@ -80,6 +80,38 @@ pub struct DifiPartitionParam {
     pub external_ivfc_level4: bool,
 }
 
+impl DifiPartitionParam {
+    pub fn get_align(&self) -> usize {
+        *[
+            self.dpfs_level2_block_len,
+            self.dpfs_level3_block_len,
+            self.ivfc_level1_block_len,
+            self.ivfc_level2_block_len,
+            self.ivfc_level3_block_len,
+            self.ivfc_level4_block_len,
+        ]
+        .iter()
+        .max()
+        .unwrap()
+    }
+
+    #[cfg(test)]
+    pub fn random() -> DifiPartitionParam {
+        use rand::prelude::*;
+        let mut rng = rand::thread_rng();
+        DifiPartitionParam {
+            dpfs_level2_block_len: 1 << rng.gen_range(1, 10),
+            dpfs_level3_block_len: 1 << rng.gen_range(1, 10),
+            ivfc_level1_block_len: 1 << rng.gen_range(6, 10),
+            ivfc_level2_block_len: 1 << rng.gen_range(6, 10),
+            ivfc_level3_block_len: 1 << rng.gen_range(6, 10),
+            ivfc_level4_block_len: 1 << rng.gen_range(6, 10),
+            data_len: rng.gen_range(1, 10_000),
+            external_ivfc_level4: rng.gen(),
+        }
+    }
+}
+
 pub struct DifiPartition {
     dpfs_level1: Rc<DualFile>,
     dpfs_level2: Rc<DpfsLevel>,
@@ -441,18 +473,8 @@ mod test {
 
         let mut rng = rand::thread_rng();
         for _ in 0..10 {
-            let len = rng.gen_range(1, 10_000);
-
-            let param = DifiPartitionParam {
-                dpfs_level2_block_len: 1 << rng.gen_range(1, 10),
-                dpfs_level3_block_len: 1 << rng.gen_range(1, 10),
-                ivfc_level1_block_len: 1 << rng.gen_range(6, 10),
-                ivfc_level2_block_len: 1 << rng.gen_range(6, 10),
-                ivfc_level3_block_len: 1 << rng.gen_range(6, 10),
-                ivfc_level4_block_len: 1 << rng.gen_range(6, 10),
-                data_len: len,
-                external_ivfc_level4: rng.gen(),
-            };
+            let param = DifiPartitionParam::random();
+            let len = param.data_len;
 
             let (descriptor_len, partition_len) = DifiPartition::calculate_size(&param);
             let descriptor = Rc::new(MemoryFile::new(vec![0; descriptor_len]));

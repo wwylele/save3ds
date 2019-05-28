@@ -1,4 +1,5 @@
-use crate::difi_partition::DifiPartition;
+use crate::align_up;
+use crate::difi_partition::*;
 use crate::dual_file::DualFile;
 use crate::error::*;
 use crate::ivfc_level::IvfcLevel;
@@ -45,7 +46,162 @@ pub struct Disa {
     partitions: Vec<Rc<DifiPartition>>,
 }
 
+struct DisaInfo {
+    secondary_table_offset: usize,
+    primary_table_offset: usize,
+    table_len: usize,
+    descriptor_a_offset: usize,
+    descriptor_a_len: usize,
+    partition_a_offset: usize,
+    partition_a_len: usize,
+    descriptor_b_offset: usize,
+    descriptor_b_len: usize,
+    partition_b_offset: usize,
+    partition_b_len: usize,
+    end: usize,
+}
+
 impl Disa {
+    fn calculate_info(
+        partition_a_param: &DifiPartitionParam,
+        partition_b_param: Option<&DifiPartitionParam>,
+    ) -> DisaInfo {
+        let (descriptor_a_len, partition_a_len) = DifiPartition::calculate_size(partition_a_param);
+        let (descriptor_b_len, partition_b_len) =
+            partition_b_param.map_or((0, 0), DifiPartition::calculate_size);
+        let descriptor_a_offset = 0;
+        let (descriptor_b_offset, table_len) = if partition_b_param.is_some() {
+            let descriptor_b_offset = align_up(descriptor_a_offset + descriptor_a_len, 8);
+            let table_len = align_up(descriptor_b_offset + descriptor_b_len, 8);
+            (descriptor_b_offset, table_len)
+        } else {
+            (0, descriptor_a_len)
+            // yeah, table_len doesn't align up to 8 in this case
+        };
+
+        let secondary_table_offset = 0x200;
+        let primary_table_offset = align_up(secondary_table_offset + table_len, 8);
+
+        let partition_a_align = partition_a_param.get_align();
+        let partition_a_offset = align_up(primary_table_offset + table_len, partition_a_align);
+
+        let (partition_b_offset, end) = if let Some(partition_b_param) = partition_b_param {
+            let partition_b_align = partition_b_param.get_align();
+            let partition_b_offset =
+                align_up(partition_a_offset + partition_a_len, partition_b_align);
+            let end = partition_b_offset + partition_b_len;
+            (partition_b_offset, end)
+        } else {
+            (0, partition_a_offset + partition_a_len)
+        };
+        DisaInfo {
+            secondary_table_offset,
+            primary_table_offset,
+            table_len,
+            descriptor_a_offset,
+            descriptor_a_len,
+            partition_a_offset,
+            partition_a_len,
+            descriptor_b_offset,
+            descriptor_b_len,
+            partition_b_offset,
+            partition_b_len,
+            end,
+        }
+    }
+
+    pub fn calculate_size(
+        partition_a_param: &DifiPartitionParam,
+        partition_b_param: Option<&DifiPartitionParam>,
+    ) -> usize {
+        Disa::calculate_info(partition_a_param, partition_b_param).end
+    }
+
+    pub fn format(
+        file: Rc<RandomAccessFile>,
+        signer: Option<(Box<Signer>, [u8; 16])>,
+        partition_a_param: &DifiPartitionParam,
+        partition_b_param: Option<&DifiPartitionParam>,
+    ) -> Result<(), Error> {
+        file.write(0, &[0; 0x200])?;
+        let header_file_bare = Rc::new(SubFile::new(file.clone(), 0x100, 0x100)?);
+        let header_file: Rc<RandomAccessFile> = match signer {
+            None => header_file_bare,
+            Some((signer, key)) => Rc::new(SignedFile::new_unverified(
+                Rc::new(SubFile::new(file.clone(), 0, 0x10)?),
+                header_file_bare,
+                signer,
+                key,
+            )?),
+        };
+
+        let info = Disa::calculate_info(partition_a_param, partition_b_param);
+
+        let header = DisaHeader {
+            magic: *b"DISA",
+            version: 0x40000,
+            partition_count: partition_b_param.is_some() as u32 + 1,
+            padding1: 0,
+            secondary_table_offset: info.secondary_table_offset as u64,
+            primary_table_offset: info.primary_table_offset as u64,
+            table_size: info.table_len as u64,
+            partition_descriptor: [
+                DisaPartitionDescriptorInfo {
+                    offset: info.descriptor_a_offset as u64,
+                    size: info.descriptor_a_len as u64,
+                },
+                DisaPartitionDescriptorInfo {
+                    offset: info.descriptor_b_offset as u64,
+                    size: info.descriptor_b_len as u64,
+                },
+            ],
+            partition: [
+                DisaPartitionInfo {
+                    offset: info.partition_a_offset as u64,
+                    size: info.partition_a_len as u64,
+                },
+                DisaPartitionInfo {
+                    offset: info.partition_b_offset as u64,
+                    size: info.partition_b_len as u64,
+                },
+            ],
+            active_table: 1,
+        };
+
+        write_struct(header_file.as_ref(), 0, header)?;
+
+        let table = Rc::new(IvfcLevel::new(
+            Rc::new(SubFile::new(header_file.clone(), 0x6C, 0x20)?),
+            Rc::new(SubFile::new(
+                file.clone(),
+                info.secondary_table_offset,
+                info.table_len,
+            )?),
+            info.table_len,
+        )?);
+
+        let descriptor_a = Rc::new(SubFile::new(
+            table.clone(),
+            info.descriptor_a_offset,
+            info.descriptor_a_len,
+        )?);
+
+        DifiPartition::format(descriptor_a.as_ref(), partition_a_param)?;
+
+        if let Some(partition_b_param) = partition_b_param {
+            let descriptor_b = Rc::new(SubFile::new(
+                table.clone(),
+                info.descriptor_b_offset,
+                info.descriptor_b_len,
+            )?);
+            DifiPartition::format(descriptor_b.as_ref(), partition_b_param)?;
+        }
+
+        table.commit()?;
+        header_file.commit()?;
+        Ok(())
+    }
+
     pub fn new(
         file: Rc<RandomAccessFile>,
         signer: Option<(Box<Signer>, [u8; 16])>,
@@ -143,37 +299,94 @@ impl Index<usize> for Disa {
 #[cfg(test)]
 mod test {
     use crate::disa::*;
+    use crate::memory_file::MemoryFile;
+    use crate::signed_file::test::SimpleSigner;
+    use rand::distributions::Standard;
+    use rand::prelude::*;
 
     #[test]
     fn struct_size() {
         assert_eq!(DisaHeader::BYTE_LEN, 0x69);
     }
 
-    #[test]
-    fn fuzz() {
-        use crate::memory_file::MemoryFile;
-        use rand::distributions::Standard;
-        use rand::prelude::*;
+    fn fuzz_one_file(
+        raw_file: Rc<MemoryFile>,
+        partition_index: usize,
+        signer: Option<(Box<SimpleSigner>, [u8; 16])>,
+    ) {
         let mut rng = rand::thread_rng();
+        let mut disa = Disa::new(
+            raw_file.clone(),
+            signer
+                .as_ref()
+                .map(|(a, b)| (a.clone() as Box<dyn Signer>, *b)),
+        )
+        .unwrap();
+        let partition = &disa[partition_index];
+        let len = partition.len();
+        let init: Vec<u8> = rng.sample_iter(&Standard).take(len).collect();
+        partition.write(0, &init).unwrap();
+        let plain = MemoryFile::new(init);
 
+        crate::random_access_file::fuzzer(
+            &mut disa,
+            |disa| disa[partition_index].as_ref(),
+            |disa| disa.commit().unwrap(),
+            || {
+                Disa::new(
+                    raw_file.clone(),
+                    signer
+                        .as_ref()
+                        .map(|(a, b)| (a.clone() as Box<dyn Signer>, *b)),
+                )
+                .unwrap()
+            },
+            &plain,
+            len,
+        );
+    }
+
+    #[test]
+    fn fuzz_template() {
         let template = include_bytes!("00000000.disa");
         for _ in 0..10 {
             let raw_file = Rc::new(MemoryFile::new(template.to_vec()));
-            let mut disa = Disa::new(raw_file.clone(), None).unwrap();
-            let partition = &disa[0];
-            let len = partition.len();
-            let init: Vec<u8> = rng.sample_iter(&Standard).take(len).collect();
-            partition.write(0, &init).unwrap();
-            let plain = MemoryFile::new(init);
+            fuzz_one_file(raw_file, 0, None);
+        }
+    }
 
-            crate::random_access_file::fuzzer(
-                &mut disa,
-                |disa| disa[0].as_ref(),
-                |disa| disa.commit().unwrap(),
-                || Disa::new(raw_file.clone(), None).unwrap(),
-                &plain,
-                len,
-            );
+    #[test]
+    fn fuzz_one_partition() {
+        let mut rng = rand::thread_rng();
+        for _ in 0..10 {
+            let signer = Box::new(SimpleSigner::new());
+            let key = rng.gen();
+            let param = DifiPartitionParam::random();
+            let outer_len = Disa::calculate_size(&param, None);
+            let outer = Rc::new(MemoryFile::new(vec![0; outer_len]));
+            Disa::format(outer.clone(), Some((signer.clone(), key)), &param, None).unwrap();
+            fuzz_one_file(outer, 0, Some((signer.clone(), key)));
+        }
+    }
+    #[test]
+    fn fuzz_two_partition() {
+        let mut rng = rand::thread_rng();
+        for _ in 0..10 {
+            let signer = Box::new(SimpleSigner::new());
+            let key = rng.gen();
+            let param_a = DifiPartitionParam::random();
+            let param_b = DifiPartitionParam::random();
+            let outer_len = Disa::calculate_size(&param_a, Some(&param_b));
+            let outer = Rc::new(MemoryFile::new(vec![0; outer_len]));
+            Disa::format(
+                outer.clone(),
+                Some((signer.clone(), key)),
+                &param_a,
+                Some(&param_b),
+            )
+            .unwrap();
+            fuzz_one_file(outer.clone(), 0, Some((signer.clone(), key)));
+            fuzz_one_file(outer, 1, Some((signer.clone(), key)));
         }
     }
 

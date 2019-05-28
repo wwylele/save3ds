@@ -36,7 +36,7 @@ pub struct Diff {
 struct DiffInfo {
     secondary_table_offset: usize,
     primary_table_offset: usize,
-    table_size: usize,
+    table_len: usize,
     partition_offset: usize,
     partition_len: usize,
     end: usize,
@@ -45,26 +45,16 @@ struct DiffInfo {
 impl Diff {
     fn calculate_info(param: &DifiPartitionParam) -> DiffInfo {
         let (descriptor_len, partition_len) = DifiPartition::calculate_size(param);
-        let max_align = *[
-            param.dpfs_level2_block_len,
-            param.dpfs_level3_block_len,
-            param.ivfc_level1_block_len,
-            param.ivfc_level2_block_len,
-            param.ivfc_level3_block_len,
-            param.ivfc_level4_block_len,
-        ]
-        .iter()
-        .max()
-        .unwrap();
+        let partition_align = param.get_align();
         let secondary_table_offset = 0x200;
-        let primary_table_offset = align_up(secondary_table_offset + descriptor_len, 8);
-        let table_size = descriptor_len;
-        let partition_offset = align_up(primary_table_offset + descriptor_len, max_align);
+        let table_len = descriptor_len;
+        let primary_table_offset = align_up(secondary_table_offset + table_len, 8);
+        let partition_offset = align_up(primary_table_offset + table_len, partition_align);
         let end = partition_offset + partition_len;
         DiffInfo {
             secondary_table_offset,
             primary_table_offset,
-            table_size,
+            table_len,
             partition_offset,
             partition_len,
             end,
@@ -100,7 +90,7 @@ impl Diff {
             version: 0x30000,
             secondary_table_offset: info.secondary_table_offset as u64,
             primary_table_offset: info.primary_table_offset as u64,
-            table_size: info.table_size as u64,
+            table_size: info.table_len as u64,
             partition_offset: info.partition_offset as u64,
             partition_size: info.partition_len as u64,
             active_table: 1,
@@ -116,9 +106,9 @@ impl Diff {
             Rc::new(SubFile::new(
                 file.clone(),
                 info.secondary_table_offset,
-                info.table_size,
+                info.table_len,
             )?),
-            info.table_size,
+            info.table_len,
         )?);
 
         DifiPartition::format(table.as_ref(), param)?;
@@ -207,24 +197,11 @@ impl Diff {
 mod test {
     use crate::diff::*;
     use crate::memory_file::MemoryFile;
+    use crate::signed_file::test::SimpleSigner;
 
     #[test]
     fn struct_size() {
         assert_eq!(DiffHeader::BYTE_LEN, 0x5C);
-    }
-
-    #[derive(Clone)]
-    struct SimpleSigner {
-        salt: u8,
-    }
-
-    impl Signer for SimpleSigner {
-        fn block(&self, mut data: Vec<u8>) -> Vec<u8> {
-            for b in data.iter_mut() {
-                *b ^= self.salt;
-            }
-            data
-        }
     }
 
     #[test]
@@ -259,20 +236,11 @@ mod test {
 
         let mut rng = rand::thread_rng();
         for _ in 0..10 {
-            let len = rng.gen_range(1, 10_000);
-            let signer = Box::new(SimpleSigner { salt: rng.gen() });
+            let signer = Box::new(SimpleSigner::new());
             let key = rng.gen();
 
-            let param = DifiPartitionParam {
-                dpfs_level2_block_len: 1 << rng.gen_range(1, 10),
-                dpfs_level3_block_len: 1 << rng.gen_range(1, 10),
-                ivfc_level1_block_len: 1 << rng.gen_range(6, 10),
-                ivfc_level2_block_len: 1 << rng.gen_range(6, 10),
-                ivfc_level3_block_len: 1 << rng.gen_range(6, 10),
-                ivfc_level4_block_len: 1 << rng.gen_range(6, 10),
-                data_len: len,
-                external_ivfc_level4: rng.gen(),
-            };
+            let param = DifiPartitionParam::random();
+            let len = param.data_len;
 
             let parent_len = Diff::calculate_size(&param);
             let parent = Rc::new(MemoryFile::new(vec![0; parent_len]));

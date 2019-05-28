@@ -99,15 +99,23 @@ impl RandomAccessFile for SignedFile {
 }
 
 #[cfg(test)]
-mod test {
+pub mod test {
     use crate::memory_file::MemoryFile;
     use crate::random_access_file::*;
     use crate::signed_file::*;
     use std::rc::Rc;
 
     #[derive(Clone)]
-    struct SimpleSigner {
+    pub struct SimpleSigner {
         salt: u8,
+    }
+
+    impl SimpleSigner {
+        pub fn new() -> SimpleSigner {
+            use rand::prelude::*;
+            let mut rng = rand::thread_rng();
+            SimpleSigner { salt: rng.gen() }
+        }
     }
 
     impl Signer for SimpleSigner {
@@ -129,7 +137,7 @@ mod test {
             let len = rng.gen_range(1, 100);
             let init: Vec<u8> = rng.sample_iter(&Standard).take(len).collect();
 
-            let signer = Box::new(SimpleSigner { salt: rng.gen() });
+            let signer = Box::new(SimpleSigner::new());
             let key: [u8; 16] = rng.gen();
 
             let hash = signer.hash(init.clone());
