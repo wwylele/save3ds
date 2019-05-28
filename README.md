@@ -1,15 +1,15 @@
 # Save3DS
 
-Library and FUSE program to extract and modify common save format for 3DS, written in rust.
+Extract, import and FUSE program for common save format for 3DS, written in rust.
 
-This project, along with documentation, is still WIP. There are two main components in the project: the library `libsave3ds`, and the FUSE program `save3ds_fuse` that builds on top of it.
+This project, along with documentation, is still WIP. There are two main components in the project: the library `libsave3ds`, and the FUSE program + extract/import tool `save3ds_fuse` that builds on top of it. The FUSE feature is only available on linux and macOS.
 
-The FUSE program only supports macOS and linux. I haven't added Windows support because it seems there isn't a ready-made FUSE-like library for Windows in rust yet. It shouldn't be hard to make a thin layer on top of `libsave3ds` to build a usable Windows program, but I want to leave that task till the API becomes stable.
-
-Both the library and the FUSE program currently supports the following operations:
+Both the library and the program currently supports the following operations:
  - Full filesystem operation on save data stored on NAND, on SD or standalone
  - Most filesystem operation on extdata stored on NAND or on SD
- - Editing title database and tickets (not fully tested)
+   - Resizing file is not supported due to format limitation.
+   - Creating file needs a size specified. For example, use file name `hello\+6` to create a file `hello` with size of 6 byttes.
+ - Editing title database and tickets
 
 Note that the supported NAND format is in unpacked cleartext filesystem. If you want to read/write on the original NAND FAT image, you need to use other tools to extract the NAND data, or map another layer of FUSE (e.g. https://github.com/ihaveamac/ninfs)
 
