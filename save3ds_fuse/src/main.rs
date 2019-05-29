@@ -1092,7 +1092,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
         "f",
         "format",
         "format the specified archive",
-        "[default|param1:value1[,...]]",
+        "[\"\"|param1:value1[,...]]",
     );
     opts.optopt("", "sd", "SD root path", "DIR");
     opts.optopt("", "sdext", "mount the SD Extdata with the ID", "ID");
@@ -1136,10 +1136,8 @@ fn main() -> Result<(), Box<std::error::Error>> {
     let nand_save_id = matches.opt_str("nandsave");
     let db_type = matches.opt_str("db");
     let format_param = matches.opt_str("format");
+
     let format_param: Option<HashMap<String, String>> = format_param.map(|s| {
-        if s == "default" {
-            return HashMap::new();
-        }
         s.split(',')
             .filter_map(|p| {
                 if let Some(mid) = p.find(':') {
