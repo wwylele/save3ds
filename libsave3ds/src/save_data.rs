@@ -384,7 +384,7 @@ impl SaveData {
         };
 
         write_struct(disa[0].as_ref(), SaveHeader::BYTE_LEN, fs_info)?;
-
+        disa.commit()?;
         Ok(())
     }
 

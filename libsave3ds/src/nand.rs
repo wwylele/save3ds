@@ -32,6 +32,7 @@ impl SdNandFileSystem for Nand {
 
     fn create(&self, path: &[&str], len: usize) -> Result<(), Error> {
         let file_path = path.iter().fold(self.path.clone(), |a, b| a.join(b));
+        std::fs::create_dir_all(file_path.parent().unwrap())?;
         let f = std::fs::File::create(file_path)?;
         f.set_len(len as u64)?;
         Ok(())

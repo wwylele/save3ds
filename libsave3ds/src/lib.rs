@@ -208,6 +208,41 @@ impl Resource {
         )
     }
 
+    pub fn format_sd_save(
+        &self,
+        id: u64,
+        param: &SaveDataFormatParam,
+        len: usize,
+    ) -> Result<(), Error> {
+        let block_count = SaveData::calculate_capacity(param, len);
+        if block_count == 0 {
+            return make_error(Error::NoSpace);
+        }
+
+        let id_high = format!("{:08x}", id >> 32);
+        let id_low = format!("{:08x}", id & 0xFFFF_FFFF);
+        let sub_path = ["title", &id_high, &id_low, "data", "00000001.sav"];
+
+        let sd = self.sd.as_ref().ok_or(Error::NoSd)?;
+        sd.create(&sub_path, len)?;
+        let file = sd.open(&sub_path, true)?;
+
+        SaveData::format(
+            file,
+            SaveDataType::Sd(
+                scramble(
+                    self.key_x_sign.ok_or(Error::NoBoot9)?,
+                    self.key_y.ok_or(Error::NoMovable)?,
+                ),
+                id,
+            ),
+            &param,
+            block_count,
+        )?;
+
+        Ok(())
+    }
+
     pub fn open_sd_save(&self, id: u64, write: bool) -> Result<Rc<SaveData>, Error> {
         let id_high = format!("{:08x}", id >> 32);
         let id_low = format!("{:08x}", id & 0xFFFF_FFFF);
@@ -229,6 +264,45 @@ impl Resource {
                 id,
             ),
         )
+    }
+
+    pub fn format_nand_save(
+        &self,
+        id: u32,
+        param: &SaveDataFormatParam,
+        len: usize,
+    ) -> Result<(), Error> {
+        let block_count = SaveData::calculate_capacity(param, len);
+        if block_count == 0 {
+            return make_error(Error::NoSpace);
+        }
+
+        let sub_path = [
+            "data",
+            &hash_movable(self.key_y.ok_or(Error::NoNand)?),
+            "sysdata",
+            &format!("{:08x}", id),
+            "00000000",
+        ];
+
+        let nand = self.nand.as_ref().ok_or(Error::NoNand)?;
+        nand.create(&sub_path, len)?;
+        let file = nand.open(&sub_path, true)?;
+
+        SaveData::format(
+            file,
+            SaveDataType::Nand(
+                scramble(
+                    self.key_x_sign.ok_or(Error::NoBoot9)?,
+                    self.key_y.ok_or(Error::NoNand)?,
+                ),
+                id,
+            ),
+            &param,
+            block_count,
+        )?;
+
+        Ok(())
     }
 
     pub fn open_nand_save(&self, id: u32, write: bool) -> Result<Rc<SaveData>, Error> {
@@ -269,6 +343,31 @@ impl Resource {
             ),
             write,
         )
+    }
+
+    pub fn format_bare_save(
+        &self,
+        path: &str,
+        param: &SaveDataFormatParam,
+        len: usize,
+    ) -> Result<(), Error> {
+        let block_count = SaveData::calculate_capacity(param, len);
+        if block_count == 0 {
+            return make_error(Error::NoSpace);
+        }
+
+        std::fs::File::create(path)?.set_len(len as u64)?;
+
+        let file = Rc::new(DiskFile::new(
+            std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(path)?,
+        )?);
+
+        SaveData::format(file, SaveDataType::Bare, &param, block_count)?;
+
+        Ok(())
     }
 
     pub fn open_bare_save(&self, path: &str, write: bool) -> Result<Rc<SaveData>, Error> {

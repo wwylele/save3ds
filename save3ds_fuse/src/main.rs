@@ -982,6 +982,94 @@ fn print_usage(program: &str, opts: Options) {
     print!("{}", opts.usage(&brief));
 }
 
+fn get_default_bucket(n: usize) -> usize {
+    if n < 3 {
+        3
+    } else if n < 19 {
+        n | 1
+    } else {
+        let mut count = n;
+        while count % 2 == 0
+            || count % 3 == 0
+            || count % 5 == 0
+            || count % 7 == 0
+            || count % 11 == 0
+            || count % 13 == 0
+            || count % 17 == 0
+        {
+            count += 1;
+        }
+        count
+    }
+}
+
+fn to_save_data_format_param(
+    raw: HashMap<String, String>,
+) -> Result<(SaveDataFormatParam, usize), Box<std::error::Error>> {
+    let block_len = raw
+        .get("block_len")
+        .map(|s| s.parse::<usize>())
+        .transpose()?
+        .unwrap_or(512);
+
+    let block_type = match block_len {
+        512 => SaveDataBlockType::Small,
+        4096 => SaveDataBlockType::Large,
+        _ => {
+            println!("Unsupported block_len value");
+            return Err(Box::from(Error::InvalidValue));
+        }
+    };
+
+    let max_dir = raw
+        .get("max_dir")
+        .map(|s| s.parse::<usize>())
+        .transpose()?
+        .unwrap_or(100);
+
+    let dir_buckets = raw
+        .get("dir_buckets")
+        .map(|s| s.parse::<usize>())
+        .transpose()?
+        .unwrap_or_else(|| get_default_bucket(max_dir));
+
+    let max_file = raw
+        .get("max_file")
+        .map(|s| s.parse::<usize>())
+        .transpose()?
+        .unwrap_or(100);
+
+    let file_buckets = raw
+        .get("file_buckets")
+        .map(|s| s.parse::<usize>())
+        .transpose()?
+        .unwrap_or_else(|| get_default_bucket(max_file));
+
+    let duplicate_data = raw
+        .get("duplicate_data")
+        .map(|s| s.parse::<bool>())
+        .transpose()?
+        .unwrap_or(true);
+
+    let len = raw
+        .get("len")
+        .map(|s| s.parse::<usize>())
+        .transpose()?
+        .unwrap_or(512 * 1024);
+
+    Ok((
+        SaveDataFormatParam {
+            block_type,
+            max_dir,
+            dir_buckets,
+            max_file,
+            file_buckets,
+            duplicate_data,
+        },
+        len,
+    ))
+}
+
 fn main() -> Result<(), Box<std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     let program = args[0].clone();
@@ -999,6 +1087,12 @@ fn main() -> Result<(), Box<std::error::Error>> {
         "mount a database. DB_TYPE is one of the following:
     nandtitle, nandimport, tmptitle, tmpimport, sdtitle, sdimport, ticket",
         "DB_TYPE",
+    );
+    opts.optopt(
+        "f",
+        "format",
+        "format the specified archive",
+        "[default|param1:value1[,...]]",
     );
     opts.optopt("", "sd", "SD root path", "DIR");
     opts.optopt("", "sdext", "mount the SD Extdata with the ID", "ID");
@@ -1041,6 +1135,22 @@ fn main() -> Result<(), Box<std::error::Error>> {
     let nand_ext_id = matches.opt_str("nandext");
     let nand_save_id = matches.opt_str("nandsave");
     let db_type = matches.opt_str("db");
+    let format_param = matches.opt_str("format");
+    let format_param: Option<HashMap<String, String>> = format_param.map(|s| {
+        if s == "default" {
+            return HashMap::new();
+        }
+        s.split(',')
+            .filter_map(|p| {
+                if let Some(mid) = p.find(':') {
+                    let (l, r) = p.split_at(mid);
+                    Some((l.to_owned(), r[1..].to_owned()))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    });
 
     let read_only = matches.opt_present("r") || matches.opt_present("extract");
 
@@ -1079,6 +1189,13 @@ fn main() -> Result<(), Box<std::error::Error>> {
     let resource = Resource::new(boot9_path, movable_path, sd_path, nand_path, otp_path)?;
 
     if let Some(bare) = bare_path {
+        if let Some(format_param) = format_param {
+            println!("Formatting...");
+            let (param, len) = to_save_data_format_param(format_param)?;
+            resource.format_bare_save(&bare, &param, len)?;
+            println!("Formatting done");
+        }
+
         println!(
             "WARNING: After modification, you need to sign the CMAC header using other tools."
         );
@@ -1087,11 +1204,23 @@ fn main() -> Result<(), Box<std::error::Error>> {
             .start(operation, mountpoint)?
     } else if let Some(id) = nand_save_id {
         let id = u32::from_str_radix(&id, 16)?;
+        if let Some(format_param) = format_param {
+            println!("Formatting...");
+            let (param, len) = to_save_data_format_param(format_param)?;
+            resource.format_nand_save(id, &param, len)?;
+            println!("Formatting done");
+        }
 
         FileSystemFrontend::<SaveDataFileSystem>::new(resource.open_nand_save(id, !read_only)?)
             .start(operation, mountpoint)?
     } else if let Some(id) = sd_save_id {
         let id = u64::from_str_radix(&id, 16)?;
+        if let Some(format_param) = format_param {
+            println!("Formatting...");
+            let (param, len) = to_save_data_format_param(format_param)?;
+            resource.format_sd_save(id, &param, len)?;
+            println!("Formatting done");
+        }
 
         FileSystemFrontend::<SaveDataFileSystem>::new(resource.open_sd_save(id, !read_only)?)
             .start(operation, mountpoint)?
