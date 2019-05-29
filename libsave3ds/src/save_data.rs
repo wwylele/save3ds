@@ -90,6 +90,7 @@ pub struct SaveData {
     block_len: usize,
 }
 
+#[derive(Clone)]
 pub enum SaveDataType {
     Nand([u8; 16], u32),
     Sd([u8; 16], u64),
@@ -111,6 +112,7 @@ pub struct SaveDataFormatParam {
 }
 
 struct SaveDataInfo {
+    block_len: usize,
     param_a: DifiPartitionParam,
     param_b: Option<DifiPartitionParam>,
     dir_hash_offset: usize,
@@ -158,6 +160,7 @@ impl SaveData {
             let param_b = None;
 
             SaveDataInfo {
+                block_len,
                 param_a,
                 param_b,
                 dir_hash_offset,
@@ -199,6 +202,7 @@ impl SaveData {
             });
 
             SaveDataInfo {
+                block_len,
                 param_a,
                 param_b,
                 dir_hash_offset,
@@ -245,17 +249,150 @@ impl SaveData {
         SaveData::new(file, save_data_type)
     }
 
+    fn get_signer(save_data_type: SaveDataType) -> Option<(Box<Signer>, [u8; 16])> {
+        match save_data_type {
+            SaveDataType::Bare => None,
+            SaveDataType::Nand(key, id) => Some((Box::new(NandSaveSigner { id }), key)),
+            SaveDataType::Sd(key, id) => Some((Box::new(SdSaveSigner { id }), key)),
+        }
+    }
+
+    pub fn format(
+        file: Rc<RandomAccessFile>,
+        save_data_type: SaveDataType,
+        param: &SaveDataFormatParam,
+        block_count: usize,
+    ) -> Result<(), Error> {
+        let info = SaveData::calculate_info(param, block_count);
+        Disa::format(
+            file.clone(),
+            SaveData::get_signer(save_data_type.clone()),
+            &info.param_a,
+            info.param_b.as_ref(),
+        )?;
+
+        let disa = Rc::new(Disa::new(file, SaveData::get_signer(save_data_type))?);
+
+        let dir_hash = Rc::new(SubFile::new(
+            disa[0].clone(),
+            info.dir_hash_offset,
+            param.dir_buckets * 4,
+        )?);
+
+        let file_hash = Rc::new(SubFile::new(
+            disa[0].clone(),
+            info.file_hash_offset,
+            param.file_buckets * 4,
+        )?);
+
+        let fat_table = Rc::new(SubFile::new(
+            disa[0].clone(),
+            info.fat_offset,
+            (info.data_block_count + 1) * 8,
+        )?);
+
+        Fat::format(fat_table.as_ref())?;
+
+        let data: Rc<RandomAccessFile> = if disa.partition_count() == 2 {
+            disa[1].clone()
+        } else {
+            Rc::new(SubFile::new(
+                disa[0].clone(),
+                info.data_offset.unwrap(),
+                info.data_block_count * info.block_len,
+            )?)
+        };
+
+        let dir_table_len = (param.max_dir + 2) * (SaveExtKey::BYTE_LEN + SaveExtDir::BYTE_LEN + 4);
+        let file_table_len = (param.max_file + 1) * (SaveExtKey::BYTE_LEN + SaveFile::BYTE_LEN + 4);
+
+        let (dir_table, file_table) = if disa.partition_count() == 2 {
+            let dir_table = Rc::new(SubFile::new(
+                disa[0].clone(),
+                info.dir_table_offset.unwrap(),
+                dir_table_len,
+            )?);
+            let file_table = Rc::new(SubFile::new(
+                disa[0].clone(),
+                info.file_table_offset.unwrap(),
+                file_table_len,
+            )?);
+            FsMeta::format(
+                dir_hash,
+                dir_table,
+                param.max_dir + 2,
+                file_hash,
+                file_table,
+                param.max_file + 1,
+            )?;
+            let dir_table_combo = info.dir_table_offset.unwrap() as u64;
+            let file_table_combo = info.file_table_offset.unwrap() as u64;
+            (dir_table_combo, file_table_combo)
+        } else {
+            let fat = Fat::new(fat_table, data, info.block_len)?;
+            let (dir_table, dir_table_block_index) =
+                FatFile::create(fat.clone(), 1 + (dir_table_len - 1) / info.block_len)?;
+            let (file_table, file_table_block_index) =
+                FatFile::create(fat.clone(), 1 + (file_table_len - 1) / info.block_len)?;
+            let dir_table_combo = (dir_table_block_index as u64)
+                | (((dir_table.len() / info.block_len) as u64) << 32);
+            let file_table_combo = (file_table_block_index as u64)
+                | (((file_table.len() / info.block_len) as u64) << 32);
+            FsMeta::format(
+                dir_hash,
+                Rc::new(dir_table),
+                param.max_dir + 2,
+                file_hash,
+                Rc::new(file_table),
+                param.max_file + 1,
+            )?;
+            (dir_table_combo, file_table_combo)
+        };
+
+        let header = SaveHeader {
+            magic: *b"SAVE",
+            version: 0x40000,
+            fs_info_offset: SaveHeader::BYTE_LEN as u64,
+            image_size: (disa[0].len() / info.block_len) as u64,
+            image_block_len: info.block_len as u32,
+            padding: 0,
+        };
+
+        write_struct(disa[0].as_ref(), 0, header)?;
+
+        let fs_info = FsInfo {
+            unknown: 0,
+            block_len: info.block_len as u32,
+            dir_hash_offset: info.dir_hash_offset as u64,
+            dir_buckets: param.dir_buckets as u32,
+            p0: 0,
+            file_hash_offset: info.file_hash_offset as u64,
+            file_buckets: param.file_buckets as u32,
+            p1: 0,
+            fat_offset: info.fat_offset as u64,
+            fat_size: info.data_block_count as u32,
+            p2: 0,
+            data_offset: info.data_offset.unwrap_or(0) as u64,
+            data_block_count: info.data_block_count as u32,
+            p3: 0,
+            dir_table,
+            max_dir: param.max_dir as u32,
+            p4: 0,
+            file_table,
+            max_file: param.max_file as u32,
+            p5: 0,
+        };
+
+        write_struct(disa[0].as_ref(), SaveHeader::BYTE_LEN, fs_info)?;
+
+        Ok(())
+    }
+
     pub fn new(
         file: Rc<RandomAccessFile>,
         save_data_type: SaveDataType,
     ) -> Result<Rc<SaveData>, Error> {
-        let signer: Option<(Box<Signer>, [u8; 16])> = match save_data_type {
-            SaveDataType::Bare => None,
-            SaveDataType::Nand(key, id) => Some((Box::new(NandSaveSigner { id }), key)),
-            SaveDataType::Sd(key, id) => Some((Box::new(SdSaveSigner { id }), key)),
-        };
-
-        let disa = Rc::new(Disa::new(file, signer)?);
+        let disa = Rc::new(Disa::new(file, SaveData::get_signer(save_data_type))?);
         let header: SaveHeader = read_struct(disa[0].as_ref(), 0)?;
         if header.magic != *b"SAVE" || header.version != 0x40000 {
             return make_error(Error::MagicMismatch);
