@@ -36,6 +36,14 @@ impl DirInfo for SaveExtDir {
     fn get_next(&self) -> u32 {
         self.next
     }
+    fn new_root() -> Self {
+        SaveExtDir {
+            next: 0,
+            sub_dir: 0,
+            sub_file: 0,
+            padding: 0,
+        }
+    }
 }
 
 impl ParentedKey for SaveExtKey {

@@ -54,6 +54,14 @@ impl DirInfo for DbDir {
     fn get_next(&self) -> u32 {
         self.next
     }
+    fn new_root() -> Self {
+        DbDir {
+            next: 0,
+            sub_dir: 0,
+            sub_file: 0,
+            padding: [0; 12],
+        }
+    }
 }
 
 #[derive(ByteStruct, Clone, PartialEq)]

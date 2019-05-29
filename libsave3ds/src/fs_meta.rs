@@ -50,6 +50,34 @@ struct MetaTable<KeyType, InfoType> {
 }
 
 impl<KeyType: ByteStruct + PartialEq, InfoType: ByteStruct> MetaTable<KeyType, InfoType> {
+    fn format(
+        hash: &RandomAccessFile,
+        table: &RandomAccessFile,
+        entry_count: usize,
+    ) -> Result<(), Error> {
+        hash.write(0, &vec![0; hash.len()])?;
+
+        write_struct(table, 0, U32le { v: 1 })?;
+        write_struct(
+            table,
+            4,
+            U32le {
+                v: entry_count as u32,
+            },
+        )?;
+
+        let padding = KeyType::BYTE_LEN + InfoType::BYTE_LEN - 8;
+        if padding > 0 {
+            table.write(8, &vec![0; padding])?;
+        }
+
+        write_struct(
+            table,
+            KeyType::BYTE_LEN + InfoType::BYTE_LEN,
+            U32le { v: 0 },
+        )
+    }
+
     fn new(
         hash: Rc<RandomAccessFile>,
         table: Rc<RandomAccessFile>,
@@ -186,10 +214,13 @@ impl<KeyType: ByteStruct + PartialEq, InfoType: ByteStruct> MetaTable<KeyType, I
 }
 
 pub trait ParentedKey: ByteStruct + PartialEq + Clone {
-    type NameType: PartialEq;
+    type NameType: PartialEq + Default;
     fn get_parent(&self) -> u32;
     fn get_name(&self) -> Self::NameType;
     fn new(parent: u32, name: Self::NameType) -> Self;
+    fn new_root() -> Self {
+        Self::new(0, Self::NameType::default())
+    }
 }
 
 pub trait FileInfo: ByteStruct + Clone {
@@ -204,6 +235,7 @@ pub trait DirInfo: ByteStruct + Clone {
     fn get_sub_file(&self) -> u32;
     fn set_next(&mut self, index: u32);
     fn get_next(&self) -> u32;
+    fn new_root() -> Self;
 }
 
 pub struct FsMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType> {
@@ -218,6 +250,29 @@ impl<
         FileInfoType: FileInfo,
     > FsMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>
 {
+    pub fn format(
+        dir_hash: Rc<RandomAccessFile>,
+        dir_table: Rc<RandomAccessFile>,
+        dir_entry_count: usize,
+        file_hash: Rc<RandomAccessFile>,
+        file_table: Rc<RandomAccessFile>,
+        file_entry_count: usize,
+    ) -> Result<(), Error> {
+        MetaTable::<DirKeyType, DirInfoType>::format(
+            dir_hash.as_ref(),
+            dir_table.as_ref(),
+            dir_entry_count,
+        )?;
+        MetaTable::<FileKeyType, FileInfoType>::format(
+            file_hash.as_ref(),
+            file_table.as_ref(),
+            file_entry_count,
+        )?;
+        let dirs = MetaTable::new(dir_hash, dir_table)?;
+        dirs.add(DirKeyType::new_root(), DirInfoType::new_root())?;
+        Ok(())
+    }
+
     pub fn new(
         dir_hash: Rc<RandomAccessFile>,
         dir_table: Rc<RandomAccessFile>,
@@ -531,31 +586,6 @@ mod test {
                         + SaveExtKey::BYTE_LEN
                         + 4)
             ]));
-            write_struct(dir_table.as_ref(), 0, U32le { v: 1 }).unwrap();
-            write_struct(
-                dir_table.as_ref(),
-                4,
-                U32le {
-                    v: dir_entry_count as u32,
-                },
-            )
-            .unwrap();
-
-            {
-                let meta =
-                    MetaTable::<SaveExtKey, SaveExtDir>::new(dir_hash.clone(), dir_table.clone())
-                        .unwrap();
-                meta.add(
-                    SaveExtKey::new(0, [0; 16]),
-                    SaveExtDir {
-                        next: 0,
-                        sub_dir: 0,
-                        sub_file: 0,
-                        padding: 0,
-                    },
-                )
-                .unwrap();
-            }
 
             let file_entry_count = rng.gen_range(10, 1000);
             let file_buckets = rng.gen_range(10, 100);
@@ -568,13 +598,13 @@ mod test {
                         + 4)
             ]));
 
-            write_struct(file_table.as_ref(), 0, U32le { v: 1 }).unwrap();
-            write_struct(
-                file_table.as_ref(),
-                4,
-                U32le {
-                    v: file_entry_count as u32,
-                },
+            FsMeta::<SaveExtKey, SaveExtDir, SaveExtKey, SaveFile>::format(
+                dir_hash.clone(),
+                dir_table.clone(),
+                dir_entry_count,
+                file_hash.clone(),
+                file_table.clone(),
+                file_entry_count,
             )
             .unwrap();
 
@@ -856,17 +886,7 @@ mod test {
             let buckets = rng.gen_range(10, 100);
             let hash = Rc::new(MemoryFile::new(vec![0; buckets * 4]));
             let table = Rc::new(MemoryFile::new(vec![0; entry_count * 16]));
-            write_struct(table.as_ref(), 0, U32le { v: 1 }).unwrap();
-            write_struct(
-                table.as_ref(),
-                4,
-                U32le {
-                    v: entry_count as u32,
-                },
-            )
-            .unwrap();
-            write_struct(table.as_ref(), 12, U32le { v: 0 }).unwrap();
-
+            MetaTable::<Key, Info>::format(hash.as_ref(), table.as_ref(), entry_count).unwrap();
             let meta = MetaTable::<Key, Info>::new(hash, table).unwrap();
             #[derive(Clone)]
             struct Image {
