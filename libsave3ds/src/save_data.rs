@@ -1,3 +1,5 @@
+use crate::align_up;
+use crate::difi_partition::*;
 use crate::disa::Disa;
 use crate::error::*;
 use crate::fat::*;
@@ -94,7 +96,155 @@ pub enum SaveDataType {
     Bare,
 }
 
+pub enum SaveDataBlockType {
+    Small, // 512-byte block, for game save
+    Large, // 4096-byte block, for NAND (system) save
+}
+
+pub struct SaveDataFormatParam {
+    pub block_type: SaveDataBlockType,
+    pub max_dir: usize,
+    pub dir_buckets: usize,
+    pub max_file: usize,
+    pub file_buckets: usize,
+    pub duplicate_data: bool,
+}
+
+struct SaveDataInfo {
+    disa_len: usize,
+    dir_hash_offset: usize,
+    file_hash_offset: usize,
+    fat_offset: usize,
+    data_block_count: usize,
+    data_offset: Option<usize>,
+    dir_table_offset: Option<usize>,
+    file_table_offset: Option<usize>,
+}
+
 impl SaveData {
+    fn calculate_info(param: &SaveDataFormatParam, block_count: usize) -> SaveDataInfo {
+        let block_len = match param.block_type {
+            SaveDataBlockType::Small => 512,
+            SaveDataBlockType::Large => 4096,
+        };
+        let fs_info_offset = SaveHeader::BYTE_LEN;
+        let dir_hash_offset = fs_info_offset + FsInfo::BYTE_LEN;
+        let file_hash_offset = dir_hash_offset + param.dir_buckets * 4;
+        let fat_offset = file_hash_offset + param.file_buckets * 4;
+
+        let dir_table_len = (param.max_dir + 2) * 0x28;
+        let file_table_len = (param.max_file + 1) * 0x30;
+
+        let (param_a, param_b, data_block_count, data_offset, dir_table_offset, file_table_offset) =
+            if param.duplicate_data {
+                let data_len = align_up(dir_table_len, block_len)
+                    + align_up(file_table_len, block_len)
+                    + block_count * block_len;
+                let data_block_count = data_len / block_len;
+                let fat_len = (data_block_count + 1) * 8;
+                let data_offset = align_up(fat_offset + fat_len, block_len);
+                let inner_a_len = data_offset + data_len;
+
+                let param_a = DifiPartitionParam {
+                    dpfs_level2_block_len: 128,
+                    dpfs_level3_block_len: 4096,
+                    ivfc_level1_block_len: 512,
+                    ivfc_level2_block_len: 512,
+                    ivfc_level3_block_len: 4096,
+                    ivfc_level4_block_len: 4096,
+                    data_len: inner_a_len,
+                    external_ivfc_level4: false,
+                };
+                let param_b = None;
+
+                (
+                    param_a,
+                    param_b,
+                    data_block_count,
+                    Some(data_offset),
+                    None,
+                    None,
+                )
+            } else {
+                let data_block_count = block_count;
+                let fat_len = (data_block_count + 1) * 8;
+                let dir_table_offset = fat_offset + fat_len;
+                let file_table_offset = dir_table_offset + dir_table_len;
+                let inner_a_len = align_up(file_table_offset + file_table_len, block_len);
+                let inner_b_len = block_count * block_len;
+
+                let param_a = DifiPartitionParam {
+                    dpfs_level2_block_len: 128,
+                    dpfs_level3_block_len: 4096,
+                    ivfc_level1_block_len: 512,
+                    ivfc_level2_block_len: 512,
+                    ivfc_level3_block_len: 4096,
+                    ivfc_level4_block_len: block_len,
+                    data_len: inner_a_len,
+                    external_ivfc_level4: false,
+                };
+
+                let param_b = Some(DifiPartitionParam {
+                    dpfs_level2_block_len: 128,
+                    dpfs_level3_block_len: 4096,
+                    ivfc_level1_block_len: 512,
+                    ivfc_level2_block_len: 512,
+                    ivfc_level3_block_len: 4096,
+                    ivfc_level4_block_len: block_len,
+                    data_len: inner_b_len,
+                    external_ivfc_level4: true,
+                });
+
+                (
+                    param_a,
+                    param_b,
+                    data_block_count,
+                    None,
+                    Some(dir_table_offset),
+                    Some(file_table_offset),
+                )
+            };
+
+        let disa_len = Disa::calculate_size(&param_a, param_b.as_ref());
+        SaveDataInfo {
+            disa_len,
+            dir_hash_offset,
+            file_hash_offset,
+            fat_offset,
+            data_block_count,
+            data_offset,
+            dir_table_offset,
+            file_table_offset,
+        }
+    }
+
+    pub fn calculate_size(param: &SaveDataFormatParam, block_count: usize) -> usize {
+        SaveData::calculate_info(param, block_count).disa_len
+    }
+
+    pub fn calculate_capacity(param: &SaveDataFormatParam, disa_len: usize) -> usize {
+        let min_disa_len = SaveData::calculate_size(param, 1);
+        if min_disa_len > disa_len {
+            return 0;
+        }
+        let block_len = match param.block_type {
+            SaveDataBlockType::Small => 512,
+            SaveDataBlockType::Large => 4096,
+        };
+        let mut min_block = 1;
+        let mut max_block = disa_len / block_len + 1;
+        while max_block - min_block > 1 {
+            let mid_block = (min_block + max_block) / 2;
+            let required_len = SaveData::calculate_size(param, mid_block);
+            if required_len > disa_len {
+                max_block = mid_block;
+            } else {
+                min_block = mid_block;
+            }
+        }
+        min_block
+    }
+
     pub fn from_vec(v: Vec<u8>, save_data_type: SaveDataType) -> Result<Rc<SaveData>, Error> {
         let file = Rc::new(MemoryFile::new(v));
         SaveData::new(file, save_data_type)
