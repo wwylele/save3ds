@@ -274,6 +274,20 @@ fn iterate_fat_entry(
 }
 
 impl Fat {
+    pub fn format(table: &RandomAccessFile) -> Result<(), Error> {
+        let block_count = table.len() / 8 - 1;
+        set_head(table, Some(0))?;
+        set_node(
+            table,
+            0,
+            Node {
+                size: block_count,
+                prev: None,
+                next: None,
+            },
+        )
+    }
+
     pub fn new(
         table: Rc<RandomAccessFile>,
         data: Rc<RandomAccessFile>,
@@ -525,18 +539,7 @@ mod test {
 
             let table = Rc::new(MemoryFile::new(vec![0; 8 * (block_count + 1)]));
             let data = Rc::new(MemoryFile::new(vec![0; block_count * block_len]));
-            set_head(table.as_ref(), Some(0)).unwrap();
-            set_node(
-                table.as_ref(),
-                0,
-                Node {
-                    size: block_count,
-                    prev: None,
-                    next: None,
-                },
-            )
-            .unwrap();
-
+            Fat::format(table.as_ref()).unwrap();
             let fat = Fat::new(table, data, block_len).unwrap();
 
             let mut free_block_count = block_count;
