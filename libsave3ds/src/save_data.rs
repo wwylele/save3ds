@@ -111,7 +111,8 @@ pub struct SaveDataFormatParam {
 }
 
 struct SaveDataInfo {
-    disa_len: usize,
+    param_a: DifiPartitionParam,
+    param_b: Option<DifiPartitionParam>,
     dir_hash_offset: usize,
     file_hash_offset: usize,
     fat_offset: usize,
@@ -135,91 +136,85 @@ impl SaveData {
         let dir_table_len = (param.max_dir + 2) * 0x28;
         let file_table_len = (param.max_file + 1) * 0x30;
 
-        let (param_a, param_b, data_block_count, data_offset, dir_table_offset, file_table_offset) =
-            if param.duplicate_data {
-                let data_len = align_up(dir_table_len, block_len)
-                    + align_up(file_table_len, block_len)
-                    + block_count * block_len;
-                let data_block_count = data_len / block_len;
-                let fat_len = (data_block_count + 1) * 8;
-                let data_offset = align_up(fat_offset + fat_len, block_len);
-                let inner_a_len = data_offset + data_len;
+        if param.duplicate_data {
+            let data_len = align_up(dir_table_len, block_len)
+                + align_up(file_table_len, block_len)
+                + block_count * block_len;
+            let data_block_count = data_len / block_len;
+            let fat_len = (data_block_count + 1) * 8;
+            let data_offset = align_up(fat_offset + fat_len, block_len);
+            let inner_a_len = data_offset + data_len;
 
-                let param_a = DifiPartitionParam {
-                    dpfs_level2_block_len: 128,
-                    dpfs_level3_block_len: 4096,
-                    ivfc_level1_block_len: 512,
-                    ivfc_level2_block_len: 512,
-                    ivfc_level3_block_len: 4096,
-                    ivfc_level4_block_len: 4096,
-                    data_len: inner_a_len,
-                    external_ivfc_level4: false,
-                };
-                let param_b = None;
+            let param_a = DifiPartitionParam {
+                dpfs_level2_block_len: 128,
+                dpfs_level3_block_len: 4096,
+                ivfc_level1_block_len: 512,
+                ivfc_level2_block_len: 512,
+                ivfc_level3_block_len: 4096,
+                ivfc_level4_block_len: 4096,
+                data_len: inner_a_len,
+                external_ivfc_level4: false,
+            };
+            let param_b = None;
 
-                (
-                    param_a,
-                    param_b,
-                    data_block_count,
-                    Some(data_offset),
-                    None,
-                    None,
-                )
-            } else {
-                let data_block_count = block_count;
-                let fat_len = (data_block_count + 1) * 8;
-                let dir_table_offset = fat_offset + fat_len;
-                let file_table_offset = dir_table_offset + dir_table_len;
-                let inner_a_len = align_up(file_table_offset + file_table_len, block_len);
-                let inner_b_len = block_count * block_len;
+            SaveDataInfo {
+                param_a,
+                param_b,
+                dir_hash_offset,
+                file_hash_offset,
+                fat_offset,
+                data_block_count,
+                data_offset: Some(data_offset),
+                dir_table_offset: None,
+                file_table_offset: None,
+            }
+        } else {
+            let data_block_count = block_count;
+            let fat_len = (data_block_count + 1) * 8;
+            let dir_table_offset = fat_offset + fat_len;
+            let file_table_offset = dir_table_offset + dir_table_len;
+            let inner_a_len = align_up(file_table_offset + file_table_len, block_len);
+            let inner_b_len = block_count * block_len;
 
-                let param_a = DifiPartitionParam {
-                    dpfs_level2_block_len: 128,
-                    dpfs_level3_block_len: 4096,
-                    ivfc_level1_block_len: 512,
-                    ivfc_level2_block_len: 512,
-                    ivfc_level3_block_len: 4096,
-                    ivfc_level4_block_len: block_len,
-                    data_len: inner_a_len,
-                    external_ivfc_level4: false,
-                };
-
-                let param_b = Some(DifiPartitionParam {
-                    dpfs_level2_block_len: 128,
-                    dpfs_level3_block_len: 4096,
-                    ivfc_level1_block_len: 512,
-                    ivfc_level2_block_len: 512,
-                    ivfc_level3_block_len: 4096,
-                    ivfc_level4_block_len: block_len,
-                    data_len: inner_b_len,
-                    external_ivfc_level4: true,
-                });
-
-                (
-                    param_a,
-                    param_b,
-                    data_block_count,
-                    None,
-                    Some(dir_table_offset),
-                    Some(file_table_offset),
-                )
+            let param_a = DifiPartitionParam {
+                dpfs_level2_block_len: 128,
+                dpfs_level3_block_len: 4096,
+                ivfc_level1_block_len: 512,
+                ivfc_level2_block_len: 512,
+                ivfc_level3_block_len: 4096,
+                ivfc_level4_block_len: block_len,
+                data_len: inner_a_len,
+                external_ivfc_level4: false,
             };
 
-        let disa_len = Disa::calculate_size(&param_a, param_b.as_ref());
-        SaveDataInfo {
-            disa_len,
-            dir_hash_offset,
-            file_hash_offset,
-            fat_offset,
-            data_block_count,
-            data_offset,
-            dir_table_offset,
-            file_table_offset,
+            let param_b = Some(DifiPartitionParam {
+                dpfs_level2_block_len: 128,
+                dpfs_level3_block_len: 4096,
+                ivfc_level1_block_len: 512,
+                ivfc_level2_block_len: 512,
+                ivfc_level3_block_len: 4096,
+                ivfc_level4_block_len: block_len,
+                data_len: inner_b_len,
+                external_ivfc_level4: true,
+            });
+
+            SaveDataInfo {
+                param_a,
+                param_b,
+                dir_hash_offset,
+                file_hash_offset,
+                fat_offset,
+                data_block_count,
+                data_offset: None,
+                dir_table_offset: Some(dir_table_offset),
+                file_table_offset: Some(file_table_offset),
+            }
         }
     }
 
     pub fn calculate_size(param: &SaveDataFormatParam, block_count: usize) -> usize {
-        SaveData::calculate_info(param, block_count).disa_len
+        let info = SaveData::calculate_info(param, block_count);
+        Disa::calculate_size(&info.param_a, info.param_b.as_ref())
     }
 
     pub fn calculate_capacity(param: &SaveDataFormatParam, disa_len: usize) -> usize {
