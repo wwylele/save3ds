@@ -341,6 +341,23 @@ impl Resource {
         )
     }
 
+    pub fn format_nand_ext(&self, id: u64, param: &ExtDataFormatParam) -> Result<(), Error> {
+        ExtData::format(
+            self.nand.as_ref().ok_or(Error::NoNand)?.as_ref(),
+            vec![
+                "data".to_owned(),
+                hash_movable(self.key_y.ok_or(Error::NoNand)?),
+                "extdata".to_owned(),
+            ],
+            id,
+            scramble(
+                self.key_x_sign.ok_or(Error::NoBoot9)?,
+                self.key_y.ok_or(Error::NoMovable)?,
+            ),
+            param,
+        )
+    }
+
     pub fn open_nand_ext(&self, id: u64, write: bool) -> Result<Rc<ExtData>, Error> {
         ExtData::new(
             self.nand.as_ref().ok_or(Error::NoNand)?.clone(),

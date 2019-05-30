@@ -1271,6 +1271,12 @@ fn main() -> Result<(), Box<std::error::Error>> {
             .start(operation, mountpoint)?
     } else if let Some(id) = nand_ext_id {
         let id = u64::from_str_radix(&id, 16)?;
+        if let Some(format_param) = format_param {
+            println!("Formatting...");
+            let param = to_ext_data_format_param(format_param)?;
+            resource.format_nand_ext(id, &param)?;
+            println!("Formatting done");
+        }
 
         FileSystemFrontend::<ExtDataFileSystem>::new(resource.open_nand_ext(id, !read_only)?)
             .start(operation, mountpoint)?

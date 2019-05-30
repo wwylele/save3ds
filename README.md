@@ -127,6 +127,9 @@ Because of all the mess, it is recommended to use `--import` mode instead of mou
 
 Due to a bug (?) in 3DS, the last free block (512 bytes) of a title database archive (except for `ticket.db`) is broken. If the archive is almost full and data starts to be written to this block, they will not be saved.
 
+### Unhandled `Quota.dat` for NAND extdata
+
+Currently the program doesn't parse and update the `Quota.dat` file for NAND extdata. This can cause inconsistency if you modify a NAND extdata. For the same reason, formatting a NAND extdata doesn't work right now. This will be resolved in the near future.
 
 ## Tip
 
