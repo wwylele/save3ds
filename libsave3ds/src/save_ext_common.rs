@@ -65,6 +65,8 @@ mod test {
     #[test]
     fn struct_size() {
         assert_eq!(FsInfo::BYTE_LEN, 0x68);
+        assert_eq!(SaveExtKey::BYTE_LEN, 0x14);
+        assert_eq!(SaveExtDir::BYTE_LEN, 0x10);
     }
 
 }

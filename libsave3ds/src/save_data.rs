@@ -135,8 +135,8 @@ impl SaveData {
         let file_hash_offset = dir_hash_offset + param.dir_buckets * 4;
         let fat_offset = file_hash_offset + param.file_buckets * 4;
 
-        let dir_table_len = (param.max_dir + 2) * 0x28;
-        let file_table_len = (param.max_file + 1) * 0x30;
+        let dir_table_len = (param.max_dir + 2) * (SaveExtKey::BYTE_LEN + SaveExtDir::BYTE_LEN + 4);
+        let file_table_len = (param.max_file + 1) * (SaveExtKey::BYTE_LEN + SaveFile::BYTE_LEN + 4);
 
         if param.duplicate_data {
             let data_len = align_up(dir_table_len, block_len)

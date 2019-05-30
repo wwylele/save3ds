@@ -115,8 +115,8 @@ impl ExtData {
         let file_hash_offset = dir_hash_offset + param.dir_buckets * 4;
         let fat_offset = file_hash_offset + param.file_buckets * 4;
 
-        let dir_table_len = (param.max_dir + 2) * 0x28;
-        let file_table_len = (param.max_file + 1) * 0x30;
+        let dir_table_len = (param.max_dir + 2) * (SaveExtKey::BYTE_LEN + SaveExtDir::BYTE_LEN + 4);
+        let file_table_len = (param.max_file + 1) * (SaveExtKey::BYTE_LEN + ExtFile::BYTE_LEN + 4);
         let data_len = align_up(dir_table_len, block_len) + align_up(file_table_len, block_len);
         let data_block_count = data_len / block_len;
         let fat_len = (data_block_count + 1) * 8;
