@@ -1003,6 +1003,41 @@ fn get_default_bucket(n: usize) -> usize {
     }
 }
 
+fn to_ext_data_format_param(
+    raw: HashMap<String, String>,
+) -> Result<ExtDataFormatParam, Box<std::error::Error>> {
+    let max_dir = raw
+        .get("max_dir")
+        .map(|s| s.parse::<usize>())
+        .transpose()?
+        .unwrap_or(100);
+
+    let dir_buckets = raw
+        .get("dir_buckets")
+        .map(|s| s.parse::<usize>())
+        .transpose()?
+        .unwrap_or_else(|| get_default_bucket(max_dir));
+
+    let max_file = raw
+        .get("max_file")
+        .map(|s| s.parse::<usize>())
+        .transpose()?
+        .unwrap_or(100);
+
+    let file_buckets = raw
+        .get("file_buckets")
+        .map(|s| s.parse::<usize>())
+        .transpose()?
+        .unwrap_or_else(|| get_default_bucket(max_file));
+
+    Ok(ExtDataFormatParam {
+        max_dir,
+        dir_buckets,
+        max_file,
+        file_buckets,
+    })
+}
+
 fn to_save_data_format_param(
     raw: HashMap<String, String>,
 ) -> Result<(SaveDataFormatParam, usize), Box<std::error::Error>> {
@@ -1224,6 +1259,12 @@ fn main() -> Result<(), Box<std::error::Error>> {
             .start(operation, mountpoint)?
     } else if let Some(id) = sd_ext_id {
         let id = u64::from_str_radix(&id, 16)?;
+        if let Some(format_param) = format_param {
+            println!("Formatting...");
+            let param = to_ext_data_format_param(format_param)?;
+            resource.format_sd_ext(id, &param)?;
+            println!("Formatting done");
+        }
 
         FileSystemFrontend::<ExtDataFileSystem>::new(resource.open_sd_ext(id, !read_only)?)
             .start(operation, mountpoint)?

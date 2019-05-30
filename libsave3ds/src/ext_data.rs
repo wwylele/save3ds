@@ -1,3 +1,4 @@
+use crate::align_up;
 use crate::diff::Diff;
 use crate::difi_partition::DifiPartitionParam;
 use crate::error::*;
@@ -69,6 +70,13 @@ struct ExtHeader {
     mount_path: [[u8; 0x10]; 0x10],
 }
 
+pub struct ExtDataFormatParam {
+    pub max_dir: usize,
+    pub dir_buckets: usize,
+    pub max_file: usize,
+    pub file_buckets: usize,
+}
+
 pub struct ExtData {
     sd_nand: Rc<SdNandFileSystem>,
     base_path: Vec<String>,
@@ -80,6 +88,158 @@ pub struct ExtData {
 }
 
 impl ExtData {
+    pub fn format(
+        sd_nand: &SdNandFileSystem,
+        base_path: Vec<String>,
+        id: u64,
+        key: [u8; 16],
+        param: &ExtDataFormatParam,
+    ) -> Result<(), Error> {
+        let id_high = format!("{:08x}", id >> 32);
+        let id_low = format!("{:08x}", id & 0xFFFF_FFFF);
+        let ext_path: Vec<&str> = base_path
+            .iter()
+            .map(|s| s as &str)
+            .chain([id_high.as_str(), id_low.as_str()].iter().cloned())
+            .collect();
+
+        sd_nand.remove_dir(&ext_path)?;
+        let mut meta_path = ext_path;
+        meta_path.push("00000000");
+        meta_path.push("00000001");
+
+        let block_len = 4096;
+
+        let fs_info_offset = ExtHeader::BYTE_LEN;
+        let dir_hash_offset = fs_info_offset + FsInfo::BYTE_LEN;
+        let file_hash_offset = dir_hash_offset + param.dir_buckets * 4;
+        let fat_offset = file_hash_offset + param.file_buckets * 4;
+
+        let dir_table_len = (param.max_dir + 2) * 0x28;
+        let file_table_len = (param.max_file + 1) * 0x30;
+        let data_len = align_up(dir_table_len, block_len) + align_up(file_table_len, block_len);
+        let data_block_count = data_len / block_len;
+        let fat_len = (data_block_count + 1) * 8;
+        let data_offset = align_up(fat_offset + fat_len, block_len);
+        let partition_end = data_offset + data_len;
+
+        let diff_param = DifiPartitionParam {
+            dpfs_level2_block_len: 128,
+            dpfs_level3_block_len: 4096,
+            ivfc_level1_block_len: 512,
+            ivfc_level2_block_len: 512,
+            ivfc_level3_block_len: 4096,
+            ivfc_level4_block_len: 4096,
+            data_len: partition_end,
+            external_ivfc_level4: false,
+        };
+
+        let diff_len = Diff::calculate_size(&diff_param);
+
+        sd_nand.create(&meta_path, diff_len)?;
+        let meta_raw = sd_nand.open(&meta_path, true)?;
+        let signer = Box::new(ExtSigner {
+            id,
+            sub_id: Some(1),
+        });
+        Diff::format(
+            meta_raw.clone(),
+            Some((signer.clone(), key)),
+            &diff_param,
+            0x01234567_89ABCDEF,
+        )?;
+        let meta_file = Diff::new(meta_raw, Some((signer, key)))?;
+
+        let dir_hash = Rc::new(SubFile::new(
+            meta_file.partition().clone(),
+            dir_hash_offset,
+            param.dir_buckets * 4,
+        )?);
+
+        let file_hash = Rc::new(SubFile::new(
+            meta_file.partition().clone(),
+            file_hash_offset,
+            param.file_buckets * 4,
+        )?);
+
+        let fat_table = Rc::new(SubFile::new(
+            meta_file.partition().clone(),
+            fat_offset,
+            (data_block_count + 1) * 8,
+        )?);
+
+        Fat::format(fat_table.as_ref())?;
+
+        let data = Rc::new(SubFile::new(
+            meta_file.partition().clone(),
+            data_offset,
+            data_block_count * block_len,
+        )?);
+
+        let fat = Fat::new(fat_table, data, block_len)?;
+        let (dir_table, dir_table_block_index) =
+            FatFile::create(fat.clone(), 1 + (dir_table_len - 1) / block_len)?;
+        let (file_table, file_table_block_index) =
+            FatFile::create(fat.clone(), 1 + (file_table_len - 1) / block_len)?;
+        let dir_table_combo =
+            (dir_table_block_index as u64) | (((dir_table.len() / block_len) as u64) << 32);
+        let file_table_combo =
+            (file_table_block_index as u64) | (((file_table.len() / block_len) as u64) << 32);
+        FsMeta::format(
+            dir_hash,
+            Rc::new(dir_table),
+            param.max_dir + 2,
+            file_hash,
+            Rc::new(file_table),
+            param.max_file + 1,
+        )?;
+
+        let header = ExtHeader {
+            magic: *b"VSXE",
+            version: 0x30000,
+            fs_info_offset: ExtHeader::BYTE_LEN as u64,
+            image_size: (meta_file.partition().len() / block_len) as u64,
+            image_block_len: block_len as u32,
+            padding: 0,
+
+            unknown: 0,
+            action: 0,
+            unknown2: 0,
+            mount_id: 0,
+            unknown3: 0,
+            mount_path: [[0; 0x10]; 0x10],
+        };
+
+        write_struct(meta_file.partition().as_ref(), 0, header)?;
+
+        let fs_info = FsInfo {
+            unknown: 0,
+            block_len: block_len as u32,
+            dir_hash_offset: dir_hash_offset as u64,
+            dir_buckets: param.dir_buckets as u32,
+            p0: 0,
+            file_hash_offset: file_hash_offset as u64,
+            file_buckets: param.file_buckets as u32,
+            p1: 0,
+            fat_offset: fat_offset as u64,
+            fat_size: data_block_count as u32,
+            p2: 0,
+            data_offset: data_offset as u64,
+            data_block_count: data_block_count as u32,
+            p3: 0,
+            dir_table: dir_table_combo,
+            max_dir: param.max_dir as u32,
+            p4: 0,
+            file_table: file_table_combo,
+            max_file: param.max_file as u32,
+            p5: 0,
+        };
+
+        write_struct(meta_file.partition().as_ref(), ExtHeader::BYTE_LEN, fs_info)?;
+        meta_file.commit()?;
+        Ok(())
+    }
+
     pub fn new(
         sd_nand: Rc<SdNandFileSystem>,
         base_path: Vec<String>,

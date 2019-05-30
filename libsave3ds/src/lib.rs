@@ -195,6 +195,19 @@ impl Resource {
         })
     }
 
+    pub fn format_sd_ext(&self, id: u64, param: &ExtDataFormatParam) -> Result<(), Error> {
+        ExtData::format(
+            self.sd.as_ref().ok_or(Error::NoSd)?.as_ref(),
+            vec!["extdata".to_owned()],
+            id,
+            scramble(
+                self.key_x_sign.ok_or(Error::NoBoot9)?,
+                self.key_y.ok_or(Error::NoMovable)?,
+            ),
+            param,
+        )
+    }
+
     pub fn open_sd_ext(&self, id: u64, write: bool) -> Result<Rc<ExtData>, Error> {
         ExtData::new(
             self.sd.as_ref().ok_or(Error::NoSd)?.clone(),

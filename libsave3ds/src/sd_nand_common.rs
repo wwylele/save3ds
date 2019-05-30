@@ -6,4 +6,5 @@ pub trait SdNandFileSystem {
     fn open(&self, path: &[&str], write: bool) -> Result<Rc<RandomAccessFile>, Error>;
     fn create(&self, path: &[&str], len: usize) -> Result<(), Error>;
     fn remove(&self, path: &[&str]) -> Result<(), Error>;
+    fn remove_dir(&self, path: &[&str]) -> Result<(), Error>;
 }
