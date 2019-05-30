@@ -1040,12 +1040,13 @@ fn to_ext_data_format_param(
 
 fn to_save_data_format_param(
     raw: HashMap<String, String>,
+    default_block_len: usize,
 ) -> Result<(SaveDataFormatParam, usize), Box<std::error::Error>> {
     let block_len = raw
         .get("block_len")
         .map(|s| s.parse::<usize>())
         .transpose()?
-        .unwrap_or(512);
+        .unwrap_or(default_block_len);
 
     let block_type = match block_len {
         512 => SaveDataBlockType::Small,
@@ -1110,12 +1111,8 @@ fn main() -> Result<(), Box<std::error::Error>> {
     let program = args[0].clone();
 
     let mut opts = Options::new();
-    opts.optopt("b", "boot9", "boot9.bin file path", "DIR");
-    opts.optflag("h", "help", "print this help menu");
-    opts.optflag("i", "import", "import the content instead of mounting");
-    opts.optopt("m", "movable", "movable.sed file path", "FILE");
-    opts.optflag("r", "readonly", "mount as read-only file system");
     opts.optopt("", "bare", "mount a bare DISA file", "FILE");
+    opts.optopt("b", "boot9", "boot9.bin file path", "FILE");
     opts.optopt(
         "",
         "db",
@@ -1123,20 +1120,24 @@ fn main() -> Result<(), Box<std::error::Error>> {
     nandtitle, nandimport, tmptitle, tmpimport, sdtitle, sdimport, ticket",
         "DB_TYPE",
     );
+    opts.optflag("x", "extract", "extract the content instead of mounting");
     opts.optopt(
         "f",
         "format",
         "format the specified archive",
         "[\"\"|param1:value1[,...]]",
     );
-    opts.optopt("", "sd", "SD root path", "DIR");
-    opts.optopt("", "sdext", "mount the SD Extdata with the ID", "ID");
-    opts.optopt("", "sdsave", "mount the SD save with the ID", "ID");
+    opts.optflag("h", "help", "print this help menu");
+    opts.optflag("i", "import", "import the content instead of mounting");
+    opts.optopt("m", "movable", "movable.sed file path", "FILE");
     opts.optopt("", "nand", "NAND root path", "DIR");
     opts.optopt("", "nandext", "mount the NAND Extdata with the ID", "ID");
     opts.optopt("", "nandsave", "mount the NAND save with the ID", "ID");
     opts.optopt("o", "otp", "OTP file path", "FILE");
-    opts.optflag("x", "extract", "extract the content instead of mounting");
+    opts.optflag("r", "readonly", "mount as read-only file system");
+    opts.optopt("", "sd", "SD root path", "DIR");
+    opts.optopt("", "sdext", "mount the SD Extdata with the ID", "ID");
+    opts.optopt("", "sdsave", "mount the SD save with the ID", "ID");
 
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
@@ -1224,7 +1225,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
     if let Some(bare) = bare_path {
         if let Some(format_param) = format_param {
             println!("Formatting...");
-            let (param, len) = to_save_data_format_param(format_param)?;
+            let (param, len) = to_save_data_format_param(format_param, 512)?;
             resource.format_bare_save(&bare, &param, len)?;
             println!("Formatting done");
         }
@@ -1239,7 +1240,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
         let id = u32::from_str_radix(&id, 16)?;
         if let Some(format_param) = format_param {
             println!("Formatting...");
-            let (param, len) = to_save_data_format_param(format_param)?;
+            let (param, len) = to_save_data_format_param(format_param, 4096)?;
             resource.format_nand_save(id, &param, len)?;
             println!("Formatting done");
         }
@@ -1250,7 +1251,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
         let id = u64::from_str_radix(&id, 16)?;
         if let Some(format_param) = format_param {
             println!("Formatting...");
-            let (param, len) = to_save_data_format_param(format_param)?;
+            let (param, len) = to_save_data_format_param(format_param, 512)?;
             resource.format_sd_save(id, &param, len)?;
             println!("Formatting done");
         }
