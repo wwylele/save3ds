@@ -46,7 +46,9 @@ impl SdNandFileSystem for Nand {
 
     fn remove_dir(&self, path: &[&str]) -> Result<(), Error> {
         let dir_path = path.iter().fold(self.path.clone(), |a, b| a.join(b));
-        std::fs::remove_dir_all(dir_path)?;
+        if dir_path.exists() {
+            std::fs::remove_dir_all(dir_path)?;
+        }
         Ok(())
     }
 }
