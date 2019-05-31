@@ -47,7 +47,7 @@ pub struct Resource {
     nand: Option<Rc<Nand>>,
     key_sign: Option<[u8; 16]>,
     key_db: Option<[u8; 16]>,
-    key_y: Option<[u8; 16]>,
+    id0: Option<String>,
 }
 
 impl Resource {
@@ -108,6 +108,8 @@ impl Resource {
         } else {
             None
         };
+
+        let id0 = key_y.map(hash_movable);
 
         let key_sign = (|| Some(scramble(key_x_sign?, key_y?)))();
 
@@ -180,7 +182,7 @@ impl Resource {
             nand,
             key_sign,
             key_db,
-            key_y,
+            id0,
         })
     }
 
@@ -265,7 +267,7 @@ impl Resource {
 
         let sub_path = [
             "data",
-            &hash_movable(self.key_y.ok_or(Error::Missing)?),
+            self.id0.as_ref().ok_or(Error::Missing)?,
             "sysdata",
             &format!("{:08x}", id),
             "00000000",
@@ -289,7 +291,7 @@ impl Resource {
         let file = self.nand.as_ref().ok_or(Error::Missing)?.open(
             &[
                 "data",
-                &hash_movable(self.key_y.ok_or(Error::Missing)?),
+                self.id0.as_ref().ok_or(Error::Missing)?,
                 "sysdata",
                 &format!("{:08x}", id),
                 "00000000",
@@ -307,7 +309,7 @@ impl Resource {
             self.nand.as_ref().ok_or(Error::Missing)?.as_ref(),
             vec![
                 "data".to_owned(),
-                hash_movable(self.key_y.ok_or(Error::Missing)?),
+                self.id0.clone().ok_or(Error::Missing)?,
                 "extdata".to_owned(),
             ],
             id,
@@ -322,7 +324,7 @@ impl Resource {
             self.nand.as_ref().ok_or(Error::Missing)?.clone(),
             vec![
                 "data".to_owned(),
-                hash_movable(self.key_y.ok_or(Error::Missing)?),
+                self.id0.clone().ok_or(Error::Missing)?,
                 "extdata".to_owned(),
             ],
             id,
