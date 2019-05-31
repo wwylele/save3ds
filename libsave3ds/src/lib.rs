@@ -45,7 +45,7 @@ use std::rc::Rc;
 pub struct Resource {
     sd: Option<Rc<Sd>>,
     nand: Option<Rc<Nand>>,
-    key_x_sign: Option<[u8; 16]>,
+    key_sign: Option<[u8; 16]>,
     key_y: Option<[u8; 16]>,
     key_x_db: Option<[u8; 16]>,
     key_y_db: Option<[u8; 16]>,
@@ -109,6 +109,8 @@ impl Resource {
         } else {
             None
         };
+
+        let key_sign = (|| Some(scramble(key_x_sign?, key_y?)))();
 
         let sd = if let (Some(sd), Some(x), Some(y)) = (sd_path, key_x_dec, key_y) {
             Some(Rc::new(Sd::new(&sd, x, y)?))
@@ -175,7 +177,7 @@ impl Resource {
         Ok(Resource {
             sd,
             nand,
-            key_x_sign,
+            key_sign,
             key_y,
             key_x_db,
             key_y_db,
@@ -187,10 +189,7 @@ impl Resource {
             self.sd.as_ref().ok_or(Error::NoSd)?.as_ref(),
             vec!["extdata".to_owned()],
             id,
-            scramble(
-                self.key_x_sign.ok_or(Error::NoBoot9)?,
-                self.key_y.ok_or(Error::NoMovable)?,
-            ),
+            self.key_sign.ok_or(Error::NoSignKey)?,
             None,
             param,
         )
@@ -201,10 +200,7 @@ impl Resource {
             self.sd.as_ref().ok_or(Error::NoSd)?.clone(),
             vec!["extdata".to_owned()],
             id,
-            scramble(
-                self.key_x_sign.ok_or(Error::NoBoot9)?,
-                self.key_y.ok_or(Error::NoMovable)?,
-            ),
+            self.key_sign.ok_or(Error::NoSignKey)?,
             false,
             write,
         )
@@ -231,13 +227,7 @@ impl Resource {
 
         SaveData::format(
             file,
-            SaveDataType::Sd(
-                scramble(
-                    self.key_x_sign.ok_or(Error::NoBoot9)?,
-                    self.key_y.ok_or(Error::NoMovable)?,
-                ),
-                id,
-            ),
+            SaveDataType::Sd(self.key_sign.ok_or(Error::NoSignKey)?, id),
             &param,
             block_count,
         )?;
@@ -258,13 +248,7 @@ impl Resource {
 
         SaveData::new(
             dec_file,
-            SaveDataType::Sd(
-                scramble(
-                    self.key_x_sign.ok_or(Error::NoBoot9)?,
-                    self.key_y.ok_or(Error::NoMovable)?,
-                ),
-                id,
-            ),
+            SaveDataType::Sd(self.key_sign.ok_or(Error::NoSignKey)?, id),
         )
     }
 
@@ -293,13 +277,7 @@ impl Resource {
 
         SaveData::format(
             file,
-            SaveDataType::Nand(
-                scramble(
-                    self.key_x_sign.ok_or(Error::NoBoot9)?,
-                    self.key_y.ok_or(Error::NoNand)?,
-                ),
-                id,
-            ),
+            SaveDataType::Nand(self.key_sign.ok_or(Error::NoSignKey)?, id),
             &param,
             block_count,
         )?;
@@ -320,13 +298,7 @@ impl Resource {
         )?;
         SaveData::new(
             file,
-            SaveDataType::Nand(
-                scramble(
-                    self.key_x_sign.ok_or(Error::NoBoot9)?,
-                    self.key_y.ok_or(Error::NoNand)?,
-                ),
-                id,
-            ),
+            SaveDataType::Nand(self.key_sign.ok_or(Error::NoSignKey)?, id),
         )
     }
 
@@ -339,10 +311,7 @@ impl Resource {
                 "extdata".to_owned(),
             ],
             id,
-            scramble(
-                self.key_x_sign.ok_or(Error::NoBoot9)?,
-                self.key_y.ok_or(Error::NoMovable)?,
-            ),
+            self.key_sign.ok_or(Error::NoSignKey)?,
             Some(1024 * 1024),
             param,
         )
@@ -357,10 +326,7 @@ impl Resource {
                 "extdata".to_owned(),
             ],
             id,
-            scramble(
-                self.key_x_sign.ok_or(Error::NoBoot9)?,
-                self.key_y.ok_or(Error::NoMovable)?,
-            ),
+            self.key_sign.ok_or(Error::NoSignKey)?,
             true,
             write,
         )
@@ -459,20 +425,14 @@ impl Resource {
                     .as_ref()
                     .ok_or(Error::NoSd)?
                     .open(&["dbs", "title.db"], write)?,
-                Some(scramble(
-                    self.key_x_sign.ok_or(Error::NoBoot9)?,
-                    self.key_y.ok_or(Error::NoMovable)?,
-                )),
+                Some(self.key_sign.ok_or(Error::NoSignKey)?),
             ),
             DbType::SdImport => (
                 self.sd
                     .as_ref()
                     .ok_or(Error::NoSd)?
                     .open(&["dbs", "import.db"], write)?,
-                Some(scramble(
-                    self.key_x_sign.ok_or(Error::NoBoot9)?,
-                    self.key_y.ok_or(Error::NoMovable)?,
-                )),
+                Some(self.key_sign.ok_or(Error::NoSignKey)?),
             ),
         };
 

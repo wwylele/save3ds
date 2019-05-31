@@ -17,6 +17,7 @@ pub enum Error {
     NoNand,
     NoBoot9,
     NoSd,
+    NoSignKey,
     NoMovable,
     NotEmpty,
     Unsupported,
