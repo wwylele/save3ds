@@ -137,27 +137,19 @@ mod test {
             ));
             let key: [u8; 16] = rng.gen();
             let ctr: [u8; 16] = rng.gen();
-            let aes_ctr_file = AesCtrFile::new(data.clone(), key, ctr);
+            let mut aes_ctr_file = AesCtrFile::new(data.clone(), key, ctr);
             let mut init: Vec<u8> = vec![0; len];
             aes_ctr_file.read(0, &mut init).unwrap();
             let plain = MemoryFile::new(init);
 
-            for _ in 0..1000 {
-                let pos = rng.gen_range(0, len);
-                let data_len = rng.gen_range(1, len - pos + 1);
-                let operation = rng.gen_range(0, 10);
-                if operation < 5 {
-                    let mut a = vec![0; data_len];
-                    let mut b = vec![0; data_len];
-                    aes_ctr_file.read(pos, &mut a).unwrap();
-                    plain.read(pos, &mut b).unwrap();
-                    assert_eq!(a, b);
-                } else {
-                    let a: Vec<u8> = rng.sample_iter(&Standard).take(data_len).collect();
-                    aes_ctr_file.write(pos, &a).unwrap();
-                    plain.write(pos, &a).unwrap();
-                }
-            }
+            crate::random_access_file::fuzzer(
+                &mut aes_ctr_file,
+                |aes_ctr_file| aes_ctr_file,
+                |aes_ctr_file| aes_ctr_file.commit().unwrap(),
+                || AesCtrFile::new(data.clone(), key, ctr),
+                &plain,
+                len,
+            );
         }
     }
 }
