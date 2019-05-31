@@ -125,7 +125,7 @@ Because of all the mess, it is recommended to use `--import` mode instead of mou
 
 ### Broken block of title database
 
-Due to a bug (?) in 3DS, the last free block (512 bytes) of a title database archive (except for `ticket.db`) is broken. If the archive is almost full and data starts to be written to this block, they will not be saved.
+Due to a bug (?) in 3DS, the last free block (128 bytes) of a title database archive (except for `ticket.db`) is broken. If the archive is almost full and data starts to be written to this block, they will not be saved.
 
 ### Unhandled `Quota.dat` for NAND extdata
 
