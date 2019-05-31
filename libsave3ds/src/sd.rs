@@ -7,6 +7,7 @@ use crate::sd_nand_common::*;
 use sha2::*;
 use std::path::*;
 use std::rc::Rc;
+use crate::misc::*;
 
 pub struct Sd {
     path: PathBuf,
@@ -18,7 +19,7 @@ impl Sd {
         let path = std::fs::read_dir(
             PathBuf::from(sd_path)
                 .join("Nintendo 3DS")
-                .join(crate::hash_movable(key_y)),
+                .join(hash_movable(key_y)),
         )?
         .find(|a| {
             a.as_ref()
