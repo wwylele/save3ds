@@ -2,12 +2,12 @@ use crate::aes_ctr_file::AesCtrFile;
 use crate::disk_file::DiskFile;
 use crate::error::*;
 use crate::key_engine::*;
+use crate::misc::*;
 use crate::random_access_file::*;
 use crate::sd_nand_common::*;
 use sha2::*;
 use std::path::*;
 use std::rc::Rc;
-use crate::misc::*;
 
 pub struct Sd {
     path: PathBuf,
@@ -26,7 +26,7 @@ impl Sd {
                 .map(|a| a.file_type().map(|a| a.is_dir()).unwrap_or(false))
                 .unwrap_or(false)
         })
-        .ok_or(Error::NoSd)??
+        .ok_or(Error::Missing)??
         .path();
         let key = scramble(key_x, key_y);
         Ok(Sd { path, key })

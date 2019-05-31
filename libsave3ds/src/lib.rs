@@ -125,8 +125,8 @@ impl Resource {
         };
 
         let key_x_db = if let Some(otp_path) = otp_path {
-            let key_otp = key_otp.ok_or(Error::NoBoot9)?;
-            let mut iv_otp = iv_otp.ok_or(Error::NoBoot9)?;
+            let key_otp = key_otp.ok_or(Error::Missing)?;
+            let mut iv_otp = iv_otp.ok_or(Error::Missing)?;
             let mut otp_file = std::fs::File::open(otp_path)?;
             let mut otp = [0; 0x100];
             otp_file.read_exact(&mut otp)?;
@@ -147,7 +147,7 @@ impl Resource {
                 return make_error(Error::BrokenOtp);
             }
 
-            let (otp_salt, mut otp_salt_iv, mut otp_salt_block) = otp_salt.ok_or(Error::NoBoot9)?;
+            let (otp_salt, mut otp_salt_iv, mut otp_salt_block) = otp_salt.ok_or(Error::Missing)?;
             let mut hasher = Sha256::new();
             hasher.input(&otp[0x90..0xAC]);
             hasher.input(&otp_salt[..]);
@@ -186,10 +186,10 @@ impl Resource {
 
     pub fn format_sd_ext(&self, id: u64, param: &ExtDataFormatParam) -> Result<(), Error> {
         ExtData::format(
-            self.sd.as_ref().ok_or(Error::NoSd)?.as_ref(),
+            self.sd.as_ref().ok_or(Error::Missing)?.as_ref(),
             vec!["extdata".to_owned()],
             id,
-            self.key_sign.ok_or(Error::NoSignKey)?,
+            self.key_sign.ok_or(Error::Missing)?,
             None,
             param,
         )
@@ -197,10 +197,10 @@ impl Resource {
 
     pub fn open_sd_ext(&self, id: u64, write: bool) -> Result<Rc<ExtData>, Error> {
         ExtData::new(
-            self.sd.as_ref().ok_or(Error::NoSd)?.clone(),
+            self.sd.as_ref().ok_or(Error::Missing)?.clone(),
             vec!["extdata".to_owned()],
             id,
-            self.key_sign.ok_or(Error::NoSignKey)?,
+            self.key_sign.ok_or(Error::Missing)?,
             false,
             write,
         )
@@ -221,13 +221,13 @@ impl Resource {
         let id_low = format!("{:08x}", id & 0xFFFF_FFFF);
         let sub_path = ["title", &id_high, &id_low, "data", "00000001.sav"];
 
-        let sd = self.sd.as_ref().ok_or(Error::NoSd)?;
+        let sd = self.sd.as_ref().ok_or(Error::Missing)?;
         sd.create(&sub_path, len)?;
         let file = sd.open(&sub_path, true)?;
 
         SaveData::format(
             file,
-            SaveDataType::Sd(self.key_sign.ok_or(Error::NoSignKey)?, id),
+            SaveDataType::Sd(self.key_sign.ok_or(Error::Missing)?, id),
             &param,
             block_count,
         )?;
@@ -243,12 +243,12 @@ impl Resource {
         let dec_file = self
             .sd
             .as_ref()
-            .ok_or(Error::NoSd)?
+            .ok_or(Error::Missing)?
             .open(&sub_path, write)?;
 
         SaveData::new(
             dec_file,
-            SaveDataType::Sd(self.key_sign.ok_or(Error::NoSignKey)?, id),
+            SaveDataType::Sd(self.key_sign.ok_or(Error::Missing)?, id),
         )
     }
 
@@ -265,19 +265,19 @@ impl Resource {
 
         let sub_path = [
             "data",
-            &hash_movable(self.key_y.ok_or(Error::NoNand)?),
+            &hash_movable(self.key_y.ok_or(Error::Missing)?),
             "sysdata",
             &format!("{:08x}", id),
             "00000000",
         ];
 
-        let nand = self.nand.as_ref().ok_or(Error::NoNand)?;
+        let nand = self.nand.as_ref().ok_or(Error::Missing)?;
         nand.create(&sub_path, len)?;
         let file = nand.open(&sub_path, true)?;
 
         SaveData::format(
             file,
-            SaveDataType::Nand(self.key_sign.ok_or(Error::NoSignKey)?, id),
+            SaveDataType::Nand(self.key_sign.ok_or(Error::Missing)?, id),
             &param,
             block_count,
         )?;
@@ -286,10 +286,10 @@ impl Resource {
     }
 
     pub fn open_nand_save(&self, id: u32, write: bool) -> Result<Rc<SaveData>, Error> {
-        let file = self.nand.as_ref().ok_or(Error::NoNand)?.open(
+        let file = self.nand.as_ref().ok_or(Error::Missing)?.open(
             &[
                 "data",
-                &hash_movable(self.key_y.ok_or(Error::NoNand)?),
+                &hash_movable(self.key_y.ok_or(Error::Missing)?),
                 "sysdata",
                 &format!("{:08x}", id),
                 "00000000",
@@ -298,20 +298,20 @@ impl Resource {
         )?;
         SaveData::new(
             file,
-            SaveDataType::Nand(self.key_sign.ok_or(Error::NoSignKey)?, id),
+            SaveDataType::Nand(self.key_sign.ok_or(Error::Missing)?, id),
         )
     }
 
     pub fn format_nand_ext(&self, id: u64, param: &ExtDataFormatParam) -> Result<(), Error> {
         ExtData::format(
-            self.nand.as_ref().ok_or(Error::NoNand)?.as_ref(),
+            self.nand.as_ref().ok_or(Error::Missing)?.as_ref(),
             vec![
                 "data".to_owned(),
-                hash_movable(self.key_y.ok_or(Error::NoNand)?),
+                hash_movable(self.key_y.ok_or(Error::Missing)?),
                 "extdata".to_owned(),
             ],
             id,
-            self.key_sign.ok_or(Error::NoSignKey)?,
+            self.key_sign.ok_or(Error::Missing)?,
             Some(1024 * 1024),
             param,
         )
@@ -319,14 +319,14 @@ impl Resource {
 
     pub fn open_nand_ext(&self, id: u64, write: bool) -> Result<Rc<ExtData>, Error> {
         ExtData::new(
-            self.nand.as_ref().ok_or(Error::NoNand)?.clone(),
+            self.nand.as_ref().ok_or(Error::Missing)?.clone(),
             vec![
                 "data".to_owned(),
-                hash_movable(self.key_y.ok_or(Error::NoNand)?),
+                hash_movable(self.key_y.ok_or(Error::Missing)?),
                 "extdata".to_owned(),
             ],
             id,
-            self.key_sign.ok_or(Error::NoSignKey)?,
+            self.key_sign.ok_or(Error::Missing)?,
             true,
             write,
         )
@@ -373,66 +373,66 @@ impl Resource {
             DbType::NandTitle => (
                 self.nand
                     .as_ref()
-                    .ok_or(Error::NoNand)?
+                    .ok_or(Error::Missing)?
                     .open(&["dbs", "title.db"], write)?,
                 Some(scramble(
-                    self.key_x_db.ok_or(Error::NoOtp)?,
-                    self.key_y_db.ok_or(Error::NoBoot9)?,
+                    self.key_x_db.ok_or(Error::Missing)?,
+                    self.key_y_db.ok_or(Error::Missing)?,
                 )),
             ),
             DbType::NandImport => (
                 self.nand
                     .as_ref()
-                    .ok_or(Error::NoNand)?
+                    .ok_or(Error::Missing)?
                     .open(&["dbs", "import.db"], write)?,
                 Some(scramble(
-                    self.key_x_db.ok_or(Error::NoOtp)?,
-                    self.key_y_db.ok_or(Error::NoBoot9)?,
+                    self.key_x_db.ok_or(Error::Missing)?,
+                    self.key_y_db.ok_or(Error::Missing)?,
                 )),
             ),
             DbType::TmpTitle => (
                 self.nand
                     .as_ref()
-                    .ok_or(Error::NoNand)?
+                    .ok_or(Error::Missing)?
                     .open(&["dbs", "tmp_t.db"], write)?,
                 Some(scramble(
-                    self.key_x_db.ok_or(Error::NoOtp)?,
-                    self.key_y_db.ok_or(Error::NoBoot9)?,
+                    self.key_x_db.ok_or(Error::Missing)?,
+                    self.key_y_db.ok_or(Error::Missing)?,
                 )),
             ),
             DbType::TmpImport => (
                 self.nand
                     .as_ref()
-                    .ok_or(Error::NoNand)?
+                    .ok_or(Error::Missing)?
                     .open(&["dbs", "tmp_i.db"], write)?,
                 Some(scramble(
-                    self.key_x_db.ok_or(Error::NoOtp)?,
-                    self.key_y_db.ok_or(Error::NoBoot9)?,
+                    self.key_x_db.ok_or(Error::Missing)?,
+                    self.key_y_db.ok_or(Error::Missing)?,
                 )),
             ),
             DbType::Ticket => (
                 self.nand
                     .as_ref()
-                    .ok_or(Error::NoNand)?
+                    .ok_or(Error::Missing)?
                     .open(&["dbs", "ticket.db"], write)?,
                 Some(scramble(
-                    self.key_x_db.ok_or(Error::NoOtp)?,
-                    self.key_y_db.ok_or(Error::NoBoot9)?,
+                    self.key_x_db.ok_or(Error::Missing)?,
+                    self.key_y_db.ok_or(Error::Missing)?,
                 )),
             ),
             DbType::SdTitle => (
                 self.sd
                     .as_ref()
-                    .ok_or(Error::NoSd)?
+                    .ok_or(Error::Missing)?
                     .open(&["dbs", "title.db"], write)?,
-                Some(self.key_sign.ok_or(Error::NoSignKey)?),
+                Some(self.key_sign.ok_or(Error::Missing)?),
             ),
             DbType::SdImport => (
                 self.sd
                     .as_ref()
-                    .ok_or(Error::NoSd)?
+                    .ok_or(Error::Missing)?
                     .open(&["dbs", "import.db"], write)?,
-                Some(self.key_sign.ok_or(Error::NoSignKey)?),
+                Some(self.key_sign.ok_or(Error::Missing)?),
             ),
         };
 

@@ -14,15 +14,10 @@ pub enum Error {
     AlreadyExist,
     DeletingRoot,
     SignatureMismatch,
-    NoNand,
-    NoBoot9,
-    NoSd,
-    NoSignKey,
-    NoMovable,
+    Missing,
     NotEmpty,
     Unsupported,
     UniqueIdMismatch,
-    NoOtp,
     BrokenOtp,
 }
 
