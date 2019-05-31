@@ -14,6 +14,7 @@ mod fs_meta;
 mod ivfc_level;
 mod key_engine;
 mod memory_file;
+mod misc;
 mod nand;
 mod random_access_file;
 pub mod save_data;
@@ -31,6 +32,7 @@ use disk_file::DiskFile;
 use error::*;
 use ext_data::*;
 use key_engine::*;
+use misc::*;
 use nand::Nand;
 use save_data::*;
 use sd::Sd;
@@ -39,21 +41,6 @@ use sha2::*;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::*;
 use std::rc::Rc;
-
-fn hash_movable(key: [u8; 16]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.input(&key);
-    let hash = hasher.result();
-    let mut result = String::new();
-    for index in &[3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12] {
-        result.extend(format!("{:02x}", hash[*index]).chars());
-    }
-    result
-}
-
-fn align_up(offset: usize, align: usize) -> usize {
-    offset + (align - offset % align) % align
-}
 
 pub struct Resource {
     sd: Option<Rc<Sd>>,

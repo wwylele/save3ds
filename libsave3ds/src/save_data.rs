@@ -1,4 +1,3 @@
-use crate::align_up;
 use crate::difi_partition::*;
 use crate::disa::Disa;
 use crate::error::*;
@@ -6,6 +5,7 @@ use crate::fat::*;
 use crate::file_system::*;
 use crate::fs_meta::{self, FileInfo, FsInfo};
 use crate::memory_file::MemoryFile;
+use crate::misc::*;
 use crate::random_access_file::*;
 use crate::save_ext_common::*;
 use crate::signed_file::*;
