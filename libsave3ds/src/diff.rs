@@ -26,6 +26,7 @@ struct DiffHeader {
 }
 
 pub struct Diff {
+    parent_len: usize,
     header_file: Rc<RandomAccessFile>,
     table_upper: Rc<DualFile>,
     table_lower: Rc<IvfcLevel>,
@@ -121,6 +122,7 @@ impl Diff {
         file: Rc<RandomAccessFile>,
         signer: Option<(Box<Signer>, [u8; 16])>,
     ) -> Result<Diff, Error> {
+        let parent_len = file.len();
         let header_file_bare = Rc::new(SubFile::new(file.clone(), 0x100, 0x100)?);
         let header_file: Rc<RandomAccessFile> = match signer {
             None => header_file_bare,
@@ -170,12 +172,17 @@ impl Diff {
         let partition = Rc::new(DifiPartition::new(table_lower.clone(), partition)?);
 
         Ok(Diff {
+            parent_len,
             header_file,
             table_upper,
             table_lower,
             partition,
             unique_id: header.unique_id,
         })
+    }
+
+    pub fn parent_len(&self) -> usize {
+        self.parent_len
     }
 
     pub fn commit(&self) -> Result<(), Error> {

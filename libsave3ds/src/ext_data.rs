@@ -89,8 +89,7 @@ struct Quota {
     p5: u32,
     p6: u32,
     p7: u32,
-    mount_len: u32,
-    p8: u32,
+    mount_len: u64,
 }
 
 pub struct ExtDataFormatParam {
@@ -161,6 +160,63 @@ impl ExtData {
         };
 
         let meta_diff_len = Diff::calculate_size(&diff_param);
+
+        if let Some(capacity) = quota {
+            let meta_block = (1 + (meta_diff_len - 1) / 0x1000) as u32;
+            if meta_block > capacity - 2 {
+                return make_error(Error::NoSpace);
+            }
+
+            let quota_param = DifiPartitionParam {
+                dpfs_level2_block_len: 128,
+                dpfs_level3_block_len: 4096,
+                ivfc_level1_block_len: 512,
+                ivfc_level2_block_len: 512,
+                ivfc_level3_block_len: 4096,
+                ivfc_level4_block_len: 4096,
+                data_len: Quota::BYTE_LEN,
+                external_ivfc_level4: true,
+            };
+            let len = Diff::calculate_size(&quota_param);
+            let mut quota_path = ext_path.clone();
+            quota_path.push("Quota.dat");
+            sd_nand.create(&quota_path, len)?;
+            let quota_raw = sd_nand.open(&quota_path, true)?;
+            let signer = Box::new(ExtSigner { id, sub_id: None });
+            Diff::format(
+                quota_raw.clone(),
+                Some((signer.clone(), key)),
+                &quota_param,
+                0x01234567_89ABCDEF,
+            )?;
+
+            let quota_file = Diff::new(sd_nand.open(&quota_path, true)?, Some((signer, key)))?;
+            write_struct(
+                quota_file.partition().as_ref(),
+                0,
+                Quota {
+                    magic: *b"QUOT",
+                    version: 0x30000,
+                    block_len: 0x1000,
+                    dir_capacity: 126,
+                    p0: 0,
+                    max_block: capacity,
+                    p1: 0,
+                    // The -2 might come from directory block in FAT16
+                    free_block: capacity - meta_block - 2,
+                    p2: 0,
+                    p3: 0,
+                    potential_free_block: capacity - 2,
+                    p4: 0,
+                    mount_id: 1,
+                    p5: 0,
+                    p6: 0,
+                    p7: 0,
+                    mount_len: meta_diff_len as u64,
+                },
+            )?;
+            quota_file.commit()?;
+        }
 
         sd_nand.create(&meta_path, meta_diff_len)?;
         let meta_raw = sd_nand.open(&meta_path, true)?;
@@ -263,58 +319,6 @@ impl ExtData {
 
         write_struct(meta_file.partition().as_ref(), ExtHeader::BYTE_LEN, fs_info)?;
         meta_file.commit()?;
-
-        if let Some(capacity) = quota {
-            let quota_param = DifiPartitionParam {
-                dpfs_level2_block_len: 128,
-                dpfs_level3_block_len: 4096,
-                ivfc_level1_block_len: 512,
-                ivfc_level2_block_len: 512,
-                ivfc_level3_block_len: 4096,
-                ivfc_level4_block_len: 4096,
-                data_len: Quota::BYTE_LEN,
-                external_ivfc_level4: true,
-            };
-            let len = Diff::calculate_size(&quota_param);
-            let mut quota_path = ext_path.clone();
-            quota_path.push("Quota.dat");
-            sd_nand.create(&quota_path, len)?;
-            let quota_raw = sd_nand.open(&quota_path, true)?;
-            let signer = Box::new(ExtSigner { id, sub_id: None });
-            Diff::format(
-                quota_raw.clone(),
-                Some((signer.clone(), key)),
-                &quota_param,
-                0x01234567_89ABCDEF,
-            )?;
-
-            let quota_file = Diff::new(sd_nand.open(&quota_path, true)?, Some((signer, key)))?;
-            write_struct(
-                quota_file.partition().as_ref(),
-                0,
-                Quota {
-                    magic: *b"QUOT",
-                    version: 0x30000,
-                    block_len: 0x1000,
-                    dir_capacity: 126,
-                    p0: 0,
-                    max_block: capacity,
-                    p1: 0,
-                    free_block: capacity - (1 + (meta_diff_len - 1) / 0x1000) as u32,
-                    p2: 0,
-                    p3: 0,
-                    potential_free_block: capacity,
-                    p4: 0,
-                    mount_id: 1,
-                    p5: 0,
-                    p6: 0,
-                    p7: 0,
-                    mount_len: meta_diff_len as u32,
-                    p8: 0,
-                },
-            )?;
-            quota_file.commit()?;
-        }
 
         Ok(())
     }
@@ -466,9 +470,24 @@ impl File {
                 data_len: len,
                 external_ivfc_level4: true,
             });
-            center
-                .sd_nand
-                .create(&path, Diff::calculate_size(param.as_ref().unwrap()))?
+
+            let physical_len = Diff::calculate_size(param.as_ref().unwrap());
+
+            if let Some(quota_file) = center.quota_file.as_ref() {
+                let mut quota: Quota = read_struct(quota_file.partition().as_ref(), 0)?;
+                let block = (1 + (physical_len - 1) / 0x1000) as u32;
+                if quota.free_block < block {
+                    return make_error(Error::NoSpace);
+                }
+                quota.mount_id = file_index as u32;
+                quota.mount_len = physical_len as u64;
+                quota.potential_free_block = quota.free_block;
+                quota.free_block -= block;
+                write_struct(quota_file.partition().as_ref(), 0, quota)?;
+                quota_file.commit()?;
+            }
+
+            center.sd_nand.create(&path, physical_len)?
         }
         let file = center.sd_nand.open(&path, center.write)?;
         let signer = Box::new(ExtSigner {
@@ -535,6 +554,7 @@ impl FileSystem for ExtDataFileSystem {
 
     fn file_delete(file: Self::FileType) -> Result<(), Error> {
         let file_index = file.meta.get_ino() + 1;
+        let physical_len = file.data.parent_len();
         let id_high = format!("{:08x}", file.center.id >> 32);
         let id_low = format!("{:08x}", file.center.id & 0xFFFF_FFFF);
         let fid_high = file_index / 126;
@@ -554,7 +574,20 @@ impl FileSystem for ExtDataFileSystem {
             .collect();
 
         file.center.sd_nand.remove(&path)?;
-        file.meta.delete()
+        file.meta.delete()?;
+
+        if let Some(quota_file) = file.center.quota_file.as_ref() {
+            let mut quota: Quota = read_struct(quota_file.partition().as_ref(), 0)?;
+            quota.mount_id = file_index as u32;
+            quota.mount_len = physical_len as u64;
+            let block = (1 + (physical_len - 1) / 0x1000) as u32;
+            quota.free_block += block;
+            quota.potential_free_block = quota.free_block;
+            write_struct(quota_file.partition().as_ref(), 0, quota)?;
+            quota_file.commit()?;
+        }
+
+        Ok(())
     }
 
     fn read(file: &Self::FileType, pos: usize, buf: &mut [u8]) -> Result<(), Error> {
