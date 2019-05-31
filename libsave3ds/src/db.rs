@@ -3,6 +3,7 @@ use crate::error::*;
 use crate::fat::*;
 use crate::file_system::*;
 use crate::fs_meta::{self, DirInfo, FileInfo, FsInfo, ParentedKey};
+use crate::misc::*;
 use crate::random_access_file::*;
 use crate::signed_file::*;
 use crate::sub_file::SubFile;
@@ -387,7 +388,7 @@ impl FileSystem for DbFileSystem {
             // zero => non-zero
             let (fat_file, block) = FatFile::create(
                 file.center.fat.clone(),
-                1 + (len - 1) / file.center.block_len,
+                divide_up(len, file.center.block_len),
             )?;
             file.data = Some(fat_file);
             info.block = block as u32;
@@ -399,7 +400,7 @@ impl FileSystem for DbFileSystem {
             file.data
                 .as_mut()
                 .unwrap()
-                .resize(1 + (len - 1) / file.center.block_len)?;
+                .resize(divide_up(len, file.center.block_len))?;
         }
 
         info.size = len as u64;
@@ -466,7 +467,7 @@ impl FileSystem for DbFileSystem {
             (None, 0x8000_0000)
         } else {
             let (fat_file, block) =
-                FatFile::create(dir.center.fat.clone(), 1 + (len - 1) / dir.center.block_len)?;
+                FatFile::create(dir.center.fat.clone(), divide_up(len, dir.center.block_len))?;
             (Some(fat_file), block as u32)
         };
         match dir.meta.new_sub_file(

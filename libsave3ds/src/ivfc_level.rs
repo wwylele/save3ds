@@ -1,4 +1,5 @@
 use crate::error::*;
+use crate::misc::*;
 use crate::random_access_file::*;
 use sha2::*;
 use std::cell::RefCell;
@@ -24,11 +25,11 @@ impl IvfcLevel {
         block_len: usize,
     ) -> Result<IvfcLevel, Error> {
         let len = data.len();
-        let block_count = 1 + (len - 1) / block_len;
+        let block_count = divide_up(len, block_len);
         if block_count * 0x20 > hash.len() {
             return make_error(Error::SizeMismatch);
         }
-        let chunk_count = 1 + (block_count - 1) / 4;
+        let chunk_count = divide_up(block_count, 4);
         Ok(IvfcLevel {
             hash,
             data,
@@ -61,7 +62,7 @@ impl RandomAccessFile for IvfcLevel {
 
         // block index range the operation covers
         let begin_block = pos / self.block_len;
-        let end_block = 1 + (end - 1) / self.block_len;
+        let end_block = divide_up(end, self.block_len);
 
         for i in begin_block..end_block {
             // data range of this block
@@ -134,7 +135,7 @@ impl RandomAccessFile for IvfcLevel {
 
         // block index range the operation covers
         let begin_block = pos / self.block_len;
-        let end_block = 1 + (end - 1) / self.block_len;
+        let end_block = divide_up(end, self.block_len);
 
         for i in begin_block..end_block {
             self.set_status(i, BLOCK_MODIFIED);
@@ -147,7 +148,7 @@ impl RandomAccessFile for IvfcLevel {
     }
     fn commit(&self) -> Result<(), Error> {
         // Recalculate the hash for modified blocks
-        let block_count = 1 + (self.len - 1) / self.block_len;
+        let block_count = divide_up(self.len, self.block_len);
         for i in 0..block_count {
             if self.get_status(i) == BLOCK_MODIFIED {
                 let mut buf = vec![0; self.block_len];
@@ -170,6 +171,7 @@ mod test {
     use crate::error::*;
     use crate::ivfc_level::IvfcLevel;
     use crate::memory_file::MemoryFile;
+    use crate::misc::*;
     use crate::random_access_file::*;
     use std::rc::Rc;
 
@@ -182,7 +184,7 @@ mod test {
         for _ in 0..10 {
             let len = rng.gen_range(1, 10_000);
             let block_len = rng.gen_range(1, 100);
-            let block_count = 1 + (len - 1) / block_len;
+            let block_count = divide_up(len, block_len);
             let hash_len = block_count * 0x20;
             let hash = Rc::new(MemoryFile::new(
                 rng.sample_iter(&Standard).take(hash_len).collect(),

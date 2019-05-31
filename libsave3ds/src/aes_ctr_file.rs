@@ -1,4 +1,5 @@
 use crate::error::*;
+use crate::misc::*;
 use crate::random_access_file::*;
 use aes::block_cipher_trait::generic_array::GenericArray;
 use aes::block_cipher_trait::*;
@@ -60,7 +61,7 @@ impl RandomAccessFile for AesCtrFile {
 
         // block index range the operation covers
         let begin_block = pos / 16;
-        let end_block = 1 + (end - 1) / 16;
+        let end_block = divide_up(end, 16);
 
         let mut ctr = self.ctr;
         seek_ctr(&mut ctr, begin_block);
@@ -87,7 +88,7 @@ impl RandomAccessFile for AesCtrFile {
 
         // block index range the operation covers
         let begin_block = pos / 16;
-        let end_block = 1 + (end - 1) / 16;
+        let end_block = divide_up(end, 16);
 
         let mut ctr = self.ctr;
         seek_ctr(&mut ctr, begin_block);

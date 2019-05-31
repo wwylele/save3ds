@@ -1,4 +1,5 @@
 use crate::error::*;
+use crate::misc::*;
 use crate::random_access_file::*;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -21,8 +22,8 @@ impl DpfsLevel {
         if pair[1].len() != len {
             return make_error(Error::SizeMismatch);
         }
-        let block_count = 1 + (len - 1) / block_len;
-        let chunk_count = 1 + (block_count - 1) / 32;
+        let block_count = divide_up(len, block_len);
+        let chunk_count = divide_up(block_count, 32);
         if chunk_count * 4 > selector.len() {
             return make_error(Error::SizeMismatch);
         }
@@ -46,11 +47,11 @@ impl RandomAccessFile for DpfsLevel {
 
         // block index range the operation covers
         let begin_block = pos / self.block_len;
-        let end_block = 1 + (end - 1) / self.block_len;
+        let end_block = divide_up(end, self.block_len);
 
         // chunk index range the operation covers
         let begin_chunk = begin_block / 32;
-        let end_chunk = 1 + (end_block - 1) / 32;
+        let end_chunk = divide_up(end_block, 32);
 
         // read all related selectors
         let mut selector = vec![0; (end_chunk - begin_chunk) * 4];
@@ -91,11 +92,11 @@ impl RandomAccessFile for DpfsLevel {
 
         // block index range the operation covers
         let begin_block = pos / self.block_len;
-        let end_block = 1 + (end - 1) / self.block_len;
+        let end_block = divide_up(end, self.block_len);
 
         // chunk index range the operation covers
         let begin_chunk = begin_block / 32;
-        let end_chunk = 1 + (end_block - 1) / 32;
+        let end_chunk = divide_up(end_block, 32);
 
         // read all related selectors
         let mut selector = vec![0; (end_chunk - begin_chunk) * 4];
@@ -180,6 +181,7 @@ impl RandomAccessFile for DpfsLevel {
 mod test {
     use crate::dpfs_level::DpfsLevel;
     use crate::memory_file::MemoryFile;
+    use crate::misc::*;
     use crate::random_access_file::*;
     use std::rc::Rc;
 
@@ -259,8 +261,8 @@ mod test {
         for _ in 0..10 {
             let len = rng.gen_range(1, 10_000);
             let block_len = rng.gen_range(1, 100);
-            let block_count = 1 + (len - 1) / block_len;
-            let chunk_count = 1 + (block_count - 1) / 32;
+            let block_count = divide_up(len, block_len);
+            let chunk_count = divide_up(block_count, 32);
             let selector_len = chunk_count * 4;
             let selector = Rc::new(MemoryFile::new(
                 rng.sample_iter(&Standard).take(selector_len).collect(),

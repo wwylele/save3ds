@@ -133,10 +133,10 @@ struct DifiPartitionInfo {
 impl DifiPartition {
     fn calculate_info(param: &DifiPartitionParam) -> DifiPartitionInfo {
         let ivfc_level4_len = param.data_len;
-        let ivfc_level3_len = (1 + (ivfc_level4_len - 1) / param.ivfc_level4_block_len) * 0x20;
-        let ivfc_level2_len = (1 + (ivfc_level3_len - 1) / param.ivfc_level3_block_len) * 0x20;
-        let ivfc_level1_len = (1 + (ivfc_level2_len - 1) / param.ivfc_level2_block_len) * 0x20;
-        let master_hash_len = (1 + (ivfc_level1_len - 1) / param.ivfc_level1_block_len) * 0x20;
+        let ivfc_level3_len = (divide_up(ivfc_level4_len, param.ivfc_level4_block_len)) * 0x20;
+        let ivfc_level2_len = (divide_up(ivfc_level3_len, param.ivfc_level3_block_len)) * 0x20;
+        let ivfc_level1_len = (divide_up(ivfc_level2_len, param.ivfc_level2_block_len)) * 0x20;
+        let master_hash_len = (divide_up(ivfc_level1_len, param.ivfc_level1_block_len)) * 0x20;
 
         fn ivfc_align(offset: usize, len: usize, block_len: usize) -> usize {
             if len >= 4 * block_len {

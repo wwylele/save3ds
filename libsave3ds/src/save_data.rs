@@ -331,9 +331,9 @@ impl SaveData {
         } else {
             let fat = Fat::new(fat_table, data, info.block_len)?;
             let (dir_table, dir_table_block_index) =
-                FatFile::create(fat.clone(), 1 + (dir_table_len - 1) / info.block_len)?;
+                FatFile::create(fat.clone(), divide_up(dir_table_len, info.block_len))?;
             let (file_table, file_table_block_index) =
-                FatFile::create(fat.clone(), 1 + (file_table_len - 1) / info.block_len)?;
+                FatFile::create(fat.clone(), divide_up(file_table_len, info.block_len))?;
             let dir_table_combo = (dir_table_block_index as u64)
                 | (((dir_table.len() / info.block_len) as u64) << 32);
             let file_table_combo = (file_table_block_index as u64)
@@ -548,7 +548,7 @@ impl FileSystem for SaveDataFileSystem {
             // zero => non-zero
             let (fat_file, block) = FatFile::create(
                 file.center.fat.clone(),
-                1 + (len - 1) / file.center.block_len,
+                divide_up(len, file.center.block_len),
             )?;
             file.data = Some(fat_file);
             info.block = block as u32;
@@ -560,7 +560,7 @@ impl FileSystem for SaveDataFileSystem {
             file.data
                 .as_mut()
                 .unwrap()
-                .resize(1 + (len - 1) / file.center.block_len)?;
+                .resize(divide_up(len, file.center.block_len))?;
         }
 
         info.size = len as u64;
@@ -671,7 +671,7 @@ impl FileSystem for SaveDataFileSystem {
             (None, 0x8000_0000)
         } else {
             let (fat_file, block) =
-                FatFile::create(dir.center.fat.clone(), 1 + (len - 1) / dir.center.block_len)?;
+                FatFile::create(dir.center.fat.clone(), divide_up(len, dir.center.block_len))?;
             (Some(fat_file), block as u32)
         };
         match dir.meta.new_sub_file(

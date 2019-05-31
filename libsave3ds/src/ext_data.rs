@@ -1,10 +1,10 @@
-use crate::misc::*;
 use crate::diff::Diff;
 use crate::difi_partition::DifiPartitionParam;
 use crate::error::*;
 use crate::fat::*;
 use crate::file_system::*;
 use crate::fs_meta::{self, FileInfo, FsInfo};
+use crate::misc::*;
 use crate::random_access_file::*;
 use crate::save_ext_common::*;
 use crate::sd_nand_common::*;
@@ -162,7 +162,7 @@ impl ExtData {
         let meta_diff_len = Diff::calculate_size(&diff_param);
 
         if let Some(capacity) = quota {
-            let meta_block = (1 + (meta_diff_len - 1) / 0x1000) as u32;
+            let meta_block = (divide_up(meta_diff_len, 0x1000)) as u32;
             if meta_block > capacity - 2 {
                 return make_error(Error::NoSpace);
             }
@@ -260,9 +260,9 @@ impl ExtData {
 
         let fat = Fat::new(fat_table, data, block_len)?;
         let (dir_table, dir_table_block_index) =
-            FatFile::create(fat.clone(), 1 + (dir_table_len - 1) / block_len)?;
+            FatFile::create(fat.clone(), divide_up(dir_table_len, block_len))?;
         let (file_table, file_table_block_index) =
-            FatFile::create(fat.clone(), 1 + (file_table_len - 1) / block_len)?;
+            FatFile::create(fat.clone(), divide_up(file_table_len, block_len))?;
         let dir_table_combo =
             (dir_table_block_index as u64) | (((dir_table.len() / block_len) as u64) << 32);
         let file_table_combo =
@@ -475,7 +475,7 @@ impl File {
 
             if let Some(quota_file) = center.quota_file.as_ref() {
                 let mut quota: Quota = read_struct(quota_file.partition().as_ref(), 0)?;
-                let block = (1 + (physical_len - 1) / 0x1000) as u32;
+                let block = (divide_up(physical_len, 0x1000)) as u32;
                 if quota.free_block < block {
                     return make_error(Error::NoSpace);
                 }
@@ -580,7 +580,7 @@ impl FileSystem for ExtDataFileSystem {
             let mut quota: Quota = read_struct(quota_file.partition().as_ref(), 0)?;
             quota.mount_id = file_index as u32;
             quota.mount_len = physical_len as u64;
-            let block = (1 + (physical_len - 1) / 0x1000) as u32;
+            let block = (divide_up(physical_len, 0x1000)) as u32;
             quota.free_block += block;
             quota.potential_free_block = quota.free_block;
             write_struct(quota_file.partition().as_ref(), 0, quota)?;

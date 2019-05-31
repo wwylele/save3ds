@@ -1,4 +1,5 @@
 use crate::error::*;
+use crate::misc::*;
 use crate::random_access_file::*;
 use byte_struct::*;
 use std::cell::Cell;
@@ -470,7 +471,7 @@ impl RandomAccessFile for FatFile {
 
         // block index range the operation covers
         let begin_block = pos / self.fat.block_len;
-        let end_block = 1 + (end - 1) / self.fat.block_len;
+        let end_block = divide_up(end, self.fat.block_len);
 
         for i in begin_block..end_block {
             let data_begin_as_block = i * self.fat.block_len;
@@ -493,7 +494,7 @@ impl RandomAccessFile for FatFile {
 
         // block index range the operation covers
         let begin_block = pos / self.fat.block_len;
-        let end_block = 1 + (end - 1) / self.fat.block_len;
+        let end_block = divide_up(end, self.fat.block_len);
 
         for i in begin_block..end_block {
             let data_begin_as_block = i * self.fat.block_len;
