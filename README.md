@@ -129,7 +129,7 @@ Due to a bug (?) in 3DS, the last free block (512 bytes) of a title database arc
 
 ### Unhandled `Quota.dat` for NAND extdata
 
-Currently the program doesn't parse and update the `Quota.dat` file for NAND extdata. This can cause inconsistency if you modify a NAND extdata. For the same reason, formatting a NAND extdata doesn't work right now. This will be resolved in the near future.
+Currently the program doesn't parse and update the `Quota.dat` file for NAND extdata. This can cause inconsistency if you modify a NAND extdata. This might be resolved in the near future.
 
 ## Tip
 

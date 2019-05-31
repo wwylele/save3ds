@@ -204,6 +204,7 @@ impl Resource {
                 self.key_x_sign.ok_or(Error::NoBoot9)?,
                 self.key_y.ok_or(Error::NoMovable)?,
             ),
+            None,
             param,
         )
     }
@@ -217,6 +218,7 @@ impl Resource {
                 self.key_x_sign.ok_or(Error::NoBoot9)?,
                 self.key_y.ok_or(Error::NoMovable)?,
             ),
+            false,
             write,
         )
     }
@@ -354,6 +356,7 @@ impl Resource {
                 self.key_x_sign.ok_or(Error::NoBoot9)?,
                 self.key_y.ok_or(Error::NoMovable)?,
             ),
+            Some(1024 * 1024),
             param,
         )
     }
@@ -371,6 +374,7 @@ impl Resource {
                 self.key_x_sign.ok_or(Error::NoBoot9)?,
                 self.key_y.ok_or(Error::NoMovable)?,
             ),
+            true,
             write,
         )
     }

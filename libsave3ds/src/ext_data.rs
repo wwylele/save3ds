@@ -70,6 +70,29 @@ struct ExtHeader {
     mount_path: [[u8; 0x10]; 0x10],
 }
 
+#[derive(ByteStruct, Debug)]
+#[byte_struct_le]
+struct Quota {
+    magic: [u8; 4],
+    version: u32,
+    block_len: u32,
+    dir_capacity: u32,
+    p0: u32,
+    max_block: u32,
+    p1: u32,
+    free_block: u32,
+    p2: u32,
+    p3: u32,
+    potential_free_block: u32,
+    p4: u32,
+    mount_id: u32,
+    p5: u32,
+    p6: u32,
+    p7: u32,
+    mount_len: u32,
+    p8: u32,
+}
+
 pub struct ExtDataFormatParam {
     pub max_dir: usize,
     pub dir_buckets: usize,
@@ -83,6 +106,7 @@ pub struct ExtData {
     id: u64,
     fs: Rc<FsMeta>,
     meta_file: Diff,
+    quota_file: Option<Diff>,
     key: [u8; 16],
     write: bool,
 }
@@ -93,6 +117,7 @@ impl ExtData {
         base_path: Vec<String>,
         id: u64,
         key: [u8; 16],
+        quota: Option<u32>,
         param: &ExtDataFormatParam,
     ) -> Result<(), Error> {
         let id_high = format!("{:08x}", id >> 32);
@@ -104,7 +129,8 @@ impl ExtData {
             .collect();
 
         sd_nand.remove_dir(&ext_path)?;
-        let mut meta_path = ext_path;
+
+        let mut meta_path = ext_path.clone();
         meta_path.push("00000000");
         meta_path.push("00000001");
 
@@ -134,9 +160,9 @@ impl ExtData {
             external_ivfc_level4: false,
         };
 
-        let diff_len = Diff::calculate_size(&diff_param);
+        let meta_diff_len = Diff::calculate_size(&diff_param);
 
-        sd_nand.create(&meta_path, diff_len)?;
+        sd_nand.create(&meta_path, meta_diff_len)?;
         let meta_raw = sd_nand.open(&meta_path, true)?;
         let signer = Box::new(ExtSigner {
             id,
@@ -237,6 +263,59 @@ impl ExtData {
 
         write_struct(meta_file.partition().as_ref(), ExtHeader::BYTE_LEN, fs_info)?;
         meta_file.commit()?;
+
+        if let Some(capacity) = quota {
+            let quota_param = DifiPartitionParam {
+                dpfs_level2_block_len: 128,
+                dpfs_level3_block_len: 4096,
+                ivfc_level1_block_len: 512,
+                ivfc_level2_block_len: 512,
+                ivfc_level3_block_len: 4096,
+                ivfc_level4_block_len: 4096,
+                data_len: Quota::BYTE_LEN,
+                external_ivfc_level4: true,
+            };
+            let len = Diff::calculate_size(&quota_param);
+            let mut quota_path = ext_path.clone();
+            quota_path.push("Quota.dat");
+            sd_nand.create(&quota_path, len)?;
+            let quota_raw = sd_nand.open(&quota_path, true)?;
+            let signer = Box::new(ExtSigner { id, sub_id: None });
+            Diff::format(
+                quota_raw.clone(),
+                Some((signer.clone(), key)),
+                &quota_param,
+                0x01234567_89ABCDEF,
+            )?;
+
+            let quota_file = Diff::new(sd_nand.open(&quota_path, true)?, Some((signer, key)))?;
+            write_struct(
+                quota_file.partition().as_ref(),
+                0,
+                Quota {
+                    magic: *b"QUOT",
+                    version: 0x30000,
+                    block_len: 0x1000,
+                    dir_capacity: 126,
+                    p0: 0,
+                    max_block: capacity,
+                    p1: 0,
+                    free_block: capacity - (1 + (meta_diff_len - 1) / 0x1000) as u32,
+                    p2: 0,
+                    p3: 0,
+                    potential_free_block: capacity,
+                    p4: 0,
+                    mount_id: 1,
+                    p5: 0,
+                    p6: 0,
+                    p7: 0,
+                    mount_len: meta_diff_len as u32,
+                    p8: 0,
+                },
+            )?;
+            quota_file.commit()?;
+        }
+
         Ok(())
     }
 
@@ -245,15 +324,32 @@ impl ExtData {
         base_path: Vec<String>,
         id: u64,
         key: [u8; 16],
+        has_quota: bool,
         write: bool,
     ) -> Result<Rc<ExtData>, Error> {
         let id_high = format!("{:08x}", id >> 32);
         let id_low = format!("{:08x}", id & 0xFFFF_FFFF);
-        let meta_path: Vec<&str> = base_path
+        let ext_path: Vec<&str> = base_path
             .iter()
             .map(|s| s as &str)
-            .chain([&id_high, &id_low, "00000000", "00000001"].iter().cloned())
+            .chain([id_high.as_str(), id_low.as_str()].iter().cloned())
             .collect();
+
+        let quota_file = if has_quota {
+            let mut quota_path = ext_path.clone();
+            quota_path.push("Quota.dat");
+            Some(Diff::new(
+                sd_nand.open(&quota_path, write)?,
+                Some((Box::new(ExtSigner { id, sub_id: None }), key)),
+            )?)
+        } else {
+            None
+        };
+
+        let mut meta_path = ext_path;
+        meta_path.push("00000000");
+        meta_path.push("00000001");
+
         let meta_file = Diff::new(
             sd_nand.open(&meta_path, write)?,
             Some((
@@ -321,6 +417,7 @@ impl ExtData {
             id,
             fs,
             meta_file,
+            quota_file,
             key,
             write,
         }))
@@ -597,6 +694,7 @@ mod test {
     fn struct_size() {
         assert_eq!(ExtHeader::BYTE_LEN, 0x138);
         assert_eq!(ExtFile::BYTE_LEN, 24);
+        assert_eq!(Quota::BYTE_LEN, 0x48);
     }
 
 }
