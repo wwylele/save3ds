@@ -113,7 +113,7 @@ pub struct ExtData {
 impl ExtData {
     pub fn format(
         sd_nand: &SdNandFileSystem,
-        base_path: Vec<String>,
+        base_path: &[&str],
         id: u64,
         key: [u8; 16],
         quota: Option<u32>,
@@ -123,7 +123,7 @@ impl ExtData {
         let id_low = format!("{:08x}", id & 0xFFFF_FFFF);
         let ext_path: Vec<&str> = base_path
             .iter()
-            .map(|s| s as &str)
+            .cloned()
             .chain([id_high.as_str(), id_low.as_str()].iter().cloned())
             .collect();
 
@@ -325,7 +325,7 @@ impl ExtData {
 
     pub fn new(
         sd_nand: Rc<SdNandFileSystem>,
-        base_path: Vec<String>,
+        base_path: &[&str],
         id: u64,
         key: [u8; 16],
         has_quota: bool,
@@ -335,7 +335,7 @@ impl ExtData {
         let id_low = format!("{:08x}", id & 0xFFFF_FFFF);
         let ext_path: Vec<&str> = base_path
             .iter()
-            .map(|s| s as &str)
+            .cloned()
             .chain([id_high.as_str(), id_low.as_str()].iter().cloned())
             .collect();
 
@@ -417,7 +417,7 @@ impl ExtData {
 
         Ok(Rc::new(ExtData {
             sd_nand,
-            base_path,
+            base_path: base_path.iter().map(|s| s.to_string()).collect(),
             id,
             fs,
             meta_file,

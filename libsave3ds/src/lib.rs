@@ -189,7 +189,7 @@ impl Resource {
     pub fn format_sd_ext(&self, id: u64, param: &ExtDataFormatParam) -> Result<(), Error> {
         ExtData::format(
             self.sd.as_ref().ok_or(Error::Missing)?.as_ref(),
-            vec!["extdata".to_owned()],
+            &["extdata"],
             id,
             self.key_sign.ok_or(Error::Missing)?,
             None,
@@ -200,7 +200,7 @@ impl Resource {
     pub fn open_sd_ext(&self, id: u64, write: bool) -> Result<Rc<ExtData>, Error> {
         ExtData::new(
             self.sd.as_ref().ok_or(Error::Missing)?.clone(),
-            vec!["extdata".to_owned()],
+            &["extdata"],
             id,
             self.key_sign.ok_or(Error::Missing)?,
             false,
@@ -307,11 +307,7 @@ impl Resource {
     pub fn format_nand_ext(&self, id: u64, param: &ExtDataFormatParam) -> Result<(), Error> {
         ExtData::format(
             self.nand.as_ref().ok_or(Error::Missing)?.as_ref(),
-            vec![
-                "data".to_owned(),
-                self.id0.clone().ok_or(Error::Missing)?,
-                "extdata".to_owned(),
-            ],
+            &["data", self.id0.as_ref().ok_or(Error::Missing)?, "extdata"],
             id,
             self.key_sign.ok_or(Error::Missing)?,
             Some(1024 * 1024),
@@ -322,11 +318,7 @@ impl Resource {
     pub fn open_nand_ext(&self, id: u64, write: bool) -> Result<Rc<ExtData>, Error> {
         ExtData::new(
             self.nand.as_ref().ok_or(Error::Missing)?.clone(),
-            vec![
-                "data".to_owned(),
-                self.id0.clone().ok_or(Error::Missing)?,
-                "extdata".to_owned(),
-            ],
+            &["data", self.id0.as_ref().ok_or(Error::Missing)?, "extdata"],
             id,
             self.key_sign.ok_or(Error::Missing)?,
             true,
