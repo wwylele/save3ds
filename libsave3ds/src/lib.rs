@@ -46,9 +46,8 @@ pub struct Resource {
     sd: Option<Rc<Sd>>,
     nand: Option<Rc<Nand>>,
     key_sign: Option<[u8; 16]>,
+    key_db: Option<[u8; 16]>,
     key_y: Option<[u8; 16]>,
-    key_x_db: Option<[u8; 16]>,
-    key_y_db: Option<[u8; 16]>,
 }
 
 impl Resource {
@@ -174,13 +173,14 @@ impl Resource {
             None
         };
 
+        let key_db = (|| Some(scramble(key_x_db?, key_y_db?)))();
+
         Ok(Resource {
             sd,
             nand,
             key_sign,
+            key_db,
             key_y,
-            key_x_db,
-            key_y_db,
         })
     }
 
@@ -375,64 +375,49 @@ impl Resource {
                     .as_ref()
                     .ok_or(Error::Missing)?
                     .open(&["dbs", "title.db"], write)?,
-                Some(scramble(
-                    self.key_x_db.ok_or(Error::Missing)?,
-                    self.key_y_db.ok_or(Error::Missing)?,
-                )),
+                self.key_db.ok_or(Error::Missing)?,
             ),
             DbType::NandImport => (
                 self.nand
                     .as_ref()
                     .ok_or(Error::Missing)?
                     .open(&["dbs", "import.db"], write)?,
-                Some(scramble(
-                    self.key_x_db.ok_or(Error::Missing)?,
-                    self.key_y_db.ok_or(Error::Missing)?,
-                )),
+                self.key_db.ok_or(Error::Missing)?,
             ),
             DbType::TmpTitle => (
                 self.nand
                     .as_ref()
                     .ok_or(Error::Missing)?
                     .open(&["dbs", "tmp_t.db"], write)?,
-                Some(scramble(
-                    self.key_x_db.ok_or(Error::Missing)?,
-                    self.key_y_db.ok_or(Error::Missing)?,
-                )),
+                self.key_db.ok_or(Error::Missing)?,
             ),
             DbType::TmpImport => (
                 self.nand
                     .as_ref()
                     .ok_or(Error::Missing)?
                     .open(&["dbs", "tmp_i.db"], write)?,
-                Some(scramble(
-                    self.key_x_db.ok_or(Error::Missing)?,
-                    self.key_y_db.ok_or(Error::Missing)?,
-                )),
+                self.key_db.ok_or(Error::Missing)?,
             ),
             DbType::Ticket => (
                 self.nand
                     .as_ref()
                     .ok_or(Error::Missing)?
                     .open(&["dbs", "ticket.db"], write)?,
-                Some(scramble(
-                    self.key_x_db.ok_or(Error::Missing)?,
-                    self.key_y_db.ok_or(Error::Missing)?,
-                )),
+                self.key_db.ok_or(Error::Missing)?,
             ),
             DbType::SdTitle => (
                 self.sd
                     .as_ref()
                     .ok_or(Error::Missing)?
                     .open(&["dbs", "title.db"], write)?,
-                Some(self.key_sign.ok_or(Error::Missing)?),
+                self.key_sign.ok_or(Error::Missing)?,
             ),
             DbType::SdImport => (
                 self.sd
                     .as_ref()
                     .ok_or(Error::Missing)?
                     .open(&["dbs", "import.db"], write)?,
-                Some(self.key_sign.ok_or(Error::Missing)?),
+                self.key_sign.ok_or(Error::Missing)?,
             ),
         };
 

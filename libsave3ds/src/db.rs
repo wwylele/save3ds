@@ -182,23 +182,21 @@ impl Db {
     pub fn new(
         file: Rc<RandomAccessFile>,
         db_type: DbType,
-        key: Option<[u8; 16]>,
+        key: [u8; 16],
     ) -> Result<Rc<Db>, Error> {
-        let signer = key.map(|key| -> (Box<Signer>, [u8; 16]) {
-            (
-                Box::new(DbSigner {
-                    id: match db_type {
-                        DbType::Ticket => 0,
-                        DbType::SdTitle | DbType::NandTitle => 2,
-                        DbType::SdImport | DbType::NandImport => 3,
-                        DbType::TmpTitle => 4,
-                        DbType::TmpImport => 5,
-                    },
-                }),
-                key,
-            )
-        });
-        let diff = Rc::new(Diff::new(file, signer)?);
+        let signer: (Box<Signer>, [u8; 16]) = (
+            Box::new(DbSigner {
+                id: match db_type {
+                    DbType::Ticket => 0,
+                    DbType::SdTitle | DbType::NandTitle => 2,
+                    DbType::SdImport | DbType::NandImport => 3,
+                    DbType::TmpTitle => 4,
+                    DbType::TmpImport => 5,
+                },
+            }),
+            key,
+        );
+        let diff = Rc::new(Diff::new(file, Some(signer))?);
         let pre_len = if db_type == DbType::Ticket {
             0x10
         } else {
