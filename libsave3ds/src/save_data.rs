@@ -3,7 +3,7 @@ use crate::disa::Disa;
 use crate::error::*;
 use crate::fat::*;
 use crate::file_system::*;
-use crate::fs_meta::{self, FileInfo, FsInfo};
+use crate::fs_meta::{self, FileInfo, FsInfo, OffsetOrFatFile};
 use crate::memory_file::MemoryFile;
 use crate::misc::*;
 use crate::random_access_file::*;
@@ -325,8 +325,8 @@ impl SaveData {
                 file_table,
                 param.max_file + 1,
             )?;
-            let dir_table_combo = info.dir_table_offset.unwrap() as u64;
-            let file_table_combo = info.file_table_offset.unwrap() as u64;
+            let dir_table_combo = OffsetOrFatFile::from_offset(info.dir_table_offset.unwrap());
+            let file_table_combo = OffsetOrFatFile::from_offset(info.file_table_offset.unwrap());
             (dir_table_combo, file_table_combo)
         } else {
             let fat = Fat::new(fat_table, data, info.block_len)?;
@@ -334,10 +334,14 @@ impl SaveData {
                 FatFile::create(fat.clone(), divide_up(dir_table_len, info.block_len))?;
             let (file_table, file_table_block_index) =
                 FatFile::create(fat.clone(), divide_up(file_table_len, info.block_len))?;
-            let dir_table_combo = (dir_table_block_index as u64)
-                | (((dir_table.len() / info.block_len) as u64) << 32);
-            let file_table_combo = (file_table_block_index as u64)
-                | (((file_table.len() / info.block_len) as u64) << 32);
+            let dir_table_combo = OffsetOrFatFile {
+                block_index: dir_table_block_index as u32,
+                block_count: (dir_table.len() / info.block_len) as u32,
+            };
+            let file_table_combo = OffsetOrFatFile {
+                block_index: file_table_block_index as u32,
+                block_count: (file_table.len() / info.block_len) as u32,
+            };
             FsMeta::format(
                 dir_hash,
                 Rc::new(dir_table),
@@ -435,22 +439,22 @@ impl SaveData {
         let dir_table: Rc<RandomAccessFile> = if disa.partition_count() == 2 {
             Rc::new(SubFile::new(
                 disa[0].clone(),
-                fs_info.dir_table as usize,
+                fs_info.dir_table.to_offset(),
                 (fs_info.max_dir + 2) as usize * (SaveExtKey::BYTE_LEN + SaveExtDir::BYTE_LEN + 4),
             )?)
         } else {
-            let block = (fs_info.dir_table & 0xFFFF_FFFF) as usize;
+            let block = fs_info.dir_table.block_index as usize;
             Rc::new(FatFile::open(fat.clone(), block)?)
         };
 
         let file_table: Rc<RandomAccessFile> = if disa.partition_count() == 2 {
             Rc::new(SubFile::new(
                 disa[0].clone(),
-                fs_info.file_table as usize,
+                fs_info.file_table.to_offset(),
                 (fs_info.max_file + 1) as usize * (SaveExtKey::BYTE_LEN + SaveFile::BYTE_LEN + 4),
             )?)
         } else {
-            let block = (fs_info.file_table & 0xFFFF_FFFF) as usize;
+            let block = fs_info.file_table.block_index as usize;
             Rc::new(FatFile::open(fat.clone(), block)?)
         };
 

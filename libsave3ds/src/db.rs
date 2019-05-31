@@ -284,12 +284,12 @@ impl Db {
 
         let dir_table: Rc<RandomAccessFile> = Rc::new(FatFile::open(
             fat.clone(),
-            (fs_info.dir_table & 0xFFFF_FFFF) as usize,
+            fs_info.dir_table.block_index as usize,
         )?);
 
         let file_table: Rc<RandomAccessFile> = Rc::new(FatFile::open(
             fat.clone(),
-            (fs_info.file_table & 0xFFFF_FFFF) as usize,
+            fs_info.file_table.block_index as usize,
         )?);
 
         let fs = FsMeta::new(dir_hash, dir_table, file_hash, file_table)?;

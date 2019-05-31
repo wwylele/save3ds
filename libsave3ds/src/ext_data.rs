@@ -3,7 +3,7 @@ use crate::difi_partition::DifiPartitionParam;
 use crate::error::*;
 use crate::fat::*;
 use crate::file_system::*;
-use crate::fs_meta::{self, FileInfo, FsInfo};
+use crate::fs_meta::{self, FileInfo, FsInfo, OffsetOrFatFile};
 use crate::misc::*;
 use crate::random_access_file::*;
 use crate::save_ext_common::*;
@@ -263,10 +263,14 @@ impl ExtData {
             FatFile::create(fat.clone(), divide_up(dir_table_len, block_len))?;
         let (file_table, file_table_block_index) =
             FatFile::create(fat.clone(), divide_up(file_table_len, block_len))?;
-        let dir_table_combo =
-            (dir_table_block_index as u64) | (((dir_table.len() / block_len) as u64) << 32);
-        let file_table_combo =
-            (file_table_block_index as u64) | (((file_table.len() / block_len) as u64) << 32);
+        let dir_table_combo = OffsetOrFatFile {
+            block_index: dir_table_block_index as u32,
+            block_count: (dir_table.len() / block_len) as u32,
+        };
+        let file_table_combo = OffsetOrFatFile {
+            block_index: file_table_block_index as u32,
+            block_count: (file_table.len() / block_len) as u32,
+        };
         FsMeta::format(
             dir_hash,
             Rc::new(dir_table),
@@ -405,12 +409,12 @@ impl ExtData {
 
         let dir_table: Rc<RandomAccessFile> = Rc::new(FatFile::open(
             fat.clone(),
-            (fs_info.dir_table & 0xFFFF_FFFF) as usize,
+            fs_info.dir_table.block_index as usize,
         )?);
 
         let file_table: Rc<RandomAccessFile> = Rc::new(FatFile::open(
             fat.clone(),
-            (fs_info.file_table & 0xFFFF_FFFF) as usize,
+            fs_info.file_table.block_index as usize,
         )?);
 
         let fs = FsMeta::new(dir_hash, dir_table, file_hash, file_table)?;

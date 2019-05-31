@@ -6,6 +6,26 @@ use std::rc::Rc;
 
 #[derive(ByteStruct)]
 #[byte_struct_le]
+pub struct OffsetOrFatFile {
+    pub block_index: u32,
+    pub block_count: u32,
+}
+
+impl OffsetOrFatFile {
+    pub fn from_offset(offset: usize) -> OffsetOrFatFile {
+        OffsetOrFatFile {
+            block_index: (offset & 0xFFFF_FFFF) as u32,
+            block_count: (offset >> 32) as u32,
+        }
+    }
+
+    pub fn to_offset(&self) -> usize {
+        self.block_index as usize | ((self.block_count as usize) << 32)
+    }
+}
+
+#[derive(ByteStruct)]
+#[byte_struct_le]
 pub struct FsInfo {
     pub unknown: u32,
     pub block_len: u32,
@@ -21,10 +41,10 @@ pub struct FsInfo {
     pub data_offset: u64,
     pub data_block_count: u32,
     pub p3: u32,
-    pub dir_table: u64,
+    pub dir_table: OffsetOrFatFile,
     pub max_dir: u32,
     pub p4: u32,
-    pub file_table: u64,
+    pub file_table: OffsetOrFatFile,
     pub max_file: u32,
     pub p5: u32,
 }
