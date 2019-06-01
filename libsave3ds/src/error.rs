@@ -41,6 +41,6 @@ impl From<std::io::Error> for Error {
 }
 
 pub(crate) fn make_error<T>(e: Error) -> Result<T, Error> {
-    //println!("Error thrown: {:?}", e);
+    // println!("Error thrown: {:?}", e);
     Err(e)
 }

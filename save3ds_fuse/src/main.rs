@@ -804,10 +804,11 @@ where
                         return;
                     }
                 }
-                match T::write(&file, offset, &data) {
-                    Ok(()) => reply.written(data.len() as u32),
-                    _ => reply.error(EIO),
-                }
+            }
+
+            match T::write(&file, offset, &data) {
+                Ok(()) => reply.written(data.len() as u32),
+                _ => reply.error(EIO),
             }
         } else {
             reply.error(EBADF);
