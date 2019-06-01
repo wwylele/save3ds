@@ -522,20 +522,22 @@ where
                 };
 
                 if let Some(size) = size {
-                    match T::resize(file, size as usize) {
-                        Ok(()) => reply.attr(
-                            &time::Timespec::new(1, 0),
-                            &make_file_attr(
-                                self.read_only,
-                                self.uid,
-                                self.gid,
-                                Ino::File(T::file_get_ino(&file)).to_os(),
-                                T::len(&file),
-                            ),
-                        ),
-                        Err(_) => reply.error(EIO),
+                    if T::resize(file, size as usize).is_err() {
+                        reply.error(EIO);
+                        return;
                     }
                 }
+
+                reply.attr(
+                    &time::Timespec::new(1, 0),
+                    &make_file_attr(
+                        self.read_only,
+                        self.uid,
+                        self.gid,
+                        Ino::File(T::file_get_ino(&file)).to_os(),
+                        T::len(&file),
+                    ),
+                );
             }
             Ino::Dir(_) => reply.error(ENOSYS),
         }
