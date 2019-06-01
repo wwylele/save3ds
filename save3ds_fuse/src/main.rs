@@ -26,6 +26,86 @@ enum FileSystemOperation {
     Import,
 }
 
+fn is_legal_char(c: u8) -> bool {
+    c >= 32 && c < 127 && c != 47 && c != 92
+}
+
+trait NameConvert {
+    fn name_3ds_to_str(name: &Self) -> String;
+    fn name_str_to_3ds(name: &str) -> Option<Self>
+    where
+        Self: Sized;
+}
+
+impl NameConvert for u64 {
+    fn name_3ds_to_str(name: &u64) -> String {
+        format!("{:016x}", name)
+    }
+
+    fn name_str_to_3ds(name: &str) -> Option<u64> {
+        u64::from_str_radix(name, 16).ok()
+    }
+}
+
+impl NameConvert for [u8; 16] {
+    fn name_3ds_to_str(name: &[u8; 16]) -> String {
+        let mut last_char = 15;
+        loop {
+            if name[last_char] != 0 || last_char == 0 {
+                break;
+            }
+            last_char -= 1;
+        }
+
+        name[0..=last_char]
+            .iter()
+            .map(|x| {
+                if is_legal_char(*x) {
+                    String::from_utf8(vec![*x]).unwrap()
+                } else {
+                    format!("\\x{:02x}", *x)
+                }
+            })
+            .fold("".to_owned(), |mut x, y| {
+                x.push_str(&y);
+                x
+            })
+    }
+
+    fn name_str_to_3ds(name: &str) -> Option<[u8; 16]> {
+        let mut name_converted = [0; 16];
+        let bytes = name.as_bytes();
+        let mut out_i = 0;
+        let mut in_i = 0;
+        loop {
+            if in_i == bytes.len() {
+                break;
+            }
+            if out_i == name_converted.len() {
+                return None;
+            }
+
+            if bytes[in_i] != b'\\' {
+                name_converted[out_i] = bytes[in_i];
+                out_i += 1;
+                in_i += 1;
+            } else {
+                in_i += 1;
+                if *bytes.get(in_i)? != b'x' {
+                    return None;
+                }
+                in_i += 1;
+                name_converted[out_i] =
+                    u8::from_str_radix(std::str::from_utf8(bytes.get(in_i..in_i + 2)?).ok()?, 16)
+                        .ok()?;
+                out_i += 1;
+                in_i += 2;
+            }
+        }
+        Some(name_converted)
+    }
+}
+
 fn extract_impl<T: file_system::FileSystem>(
     save: &Rc<T::CenterType>,
     dir: T::DirType,
@@ -162,7 +242,7 @@ where
     Ok(())
 }
 
-#[allow(unreachable_code, unused_variables, unused_mut)]
+#[allow(unreachable_code, unused_variables)]
 fn do_mount<T: file_system::FileSystem>(
     save: Rc<T::CenterType>,
     read_only: bool,
@@ -277,17 +357,6 @@ fn make_file_attr(read_only: bool, uid: u32, gid: u32, ino: u64, file_size: usiz
     }
 }
 
-fn is_legal_char(c: u8) -> bool {
-    c >= 32 && c < 127 && c != 47 && c != 92
-}
-
-trait NameConvert {
-    fn name_3ds_to_str(name: &Self) -> String;
-    fn name_str_to_3ds(name: &str) -> Option<Self>
-    where
-        Self: Sized;
-}
-
 #[cfg(all(unix, feature = "unixfuse"))]
 fn name_os_to_3ds<T: NameConvert>(name: &OsStr) -> Option<(T, &str)> {
     let s = name.to_str()?;
@@ -299,75 +368,6 @@ fn name_os_to_3ds<T: NameConvert>(name: &OsStr) -> Option<(T, &str)> {
         (s, "")
     };
     Some((T::name_str_to_3ds(l)?, r))
-}
-
-impl NameConvert for u64 {
-    fn name_3ds_to_str(name: &u64) -> String {
-        format!("{:016x}", name)
-    }
-
-    fn name_str_to_3ds(name: &str) -> Option<u64> {
-        u64::from_str_radix(name, 16).ok()
-    }
-}
-
-impl NameConvert for [u8; 16] {
-    fn name_3ds_to_str(name: &[u8; 16]) -> String {
-        let mut last_char = 15;
-        loop {
-            if name[last_char] != 0 || last_char == 0 {
-                break;
-            }
-            last_char -= 1;
-        }
-
-        name[0..=last_char]
-            .iter()
-            .map(|x| {
-                if is_legal_char(*x) {
-                    String::from_utf8(vec![*x]).unwrap()
-                } else {
-                    format!("\\x{:02x}", *x)
-                }
-            })
-            .fold("".to_owned(), |mut x, y| {
-                x.push_str(&y);
-                x
-            })
-    }
-
-    fn name_str_to_3ds(name: &str) -> Option<[u8; 16]> {
-        let mut name_converted = [0; 16];
-        let bytes = name.as_bytes();
-        let mut out_i = 0;
-        let mut in_i = 0;
-        loop {
-            if in_i == bytes.len() {
-                break;
-            }
-            if out_i == name_converted.len() {
-                return None;
-            }
-
-            if bytes[in_i] != b'\\' {
-                name_converted[out_i] = bytes[in_i];
-                out_i += 1;
-                in_i += 1;
-            } else {
-                in_i += 1;
-                if *bytes.get(in_i)? != b'x' {
-                    return None;
-                }
-                in_i += 1;
-                name_converted[out_i] =
-                    u8::from_str_radix(std::str::from_utf8(bytes.get(in_i..in_i + 2)?).ok()?, 16)
-                        .ok()?;
-                out_i += 1;
-                in_i += 2;
-            }
-        }
-        Some(name_converted)
-    }
 }
 
 #[cfg(all(unix, feature = "unixfuse"))]
