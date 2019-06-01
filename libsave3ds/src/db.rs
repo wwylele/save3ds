@@ -360,7 +360,7 @@ impl FileSystem for DbFileSystem {
         file.meta.rename(&parent.meta, name)
     }
 
-    fn file_get_parent_ino(file: &Self::FileType) -> u32 {
+    fn file_get_parent_ino(file: &Self::FileType) -> Result<u32, Error> {
         file.meta.get_parent_ino()
     }
 
@@ -437,7 +437,7 @@ impl FileSystem for DbFileSystem {
         Ok(Dir { center, meta })
     }
 
-    fn dir_get_parent_ino(dir: &Self::DirType) -> u32 {
+    fn dir_get_parent_ino(dir: &Self::DirType) -> Result<u32, Error> {
         dir.meta.get_parent_ino()
     }
 

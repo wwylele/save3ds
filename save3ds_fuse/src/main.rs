@@ -828,8 +828,11 @@ where
                 if let Ok(dir) = T::dir_open_ino(self.save.clone(), ino) {
                     let parent_ino = if ino == 1 {
                         1
+                    } else if let Ok(parent_ino) = T::dir_get_parent_ino(&dir) {
+                        parent_ino
                     } else {
-                        T::dir_get_parent_ino(&dir)
+                        reply.error(EIO);
+                        return;
                     };
                     let mut entries = vec![
                         (Ino::Dir(ino).to_os(), FileType::Directory, ".".to_owned()),

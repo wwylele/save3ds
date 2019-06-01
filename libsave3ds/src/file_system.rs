@@ -20,7 +20,7 @@ pub trait FileSystem {
         make_error(Error::Unsupported)
     }
 
-    fn file_get_parent_ino(file: &Self::FileType) -> u32;
+    fn file_get_parent_ino(file: &Self::FileType) -> Result<u32, Error>;
 
     fn file_get_ino(file: &Self::FileType) -> u32;
 
@@ -62,7 +62,7 @@ pub trait FileSystem {
         make_error(Error::Unsupported)
     }
 
-    fn dir_get_parent_ino(dir: &Self::DirType) -> u32;
+    fn dir_get_parent_ino(dir: &Self::DirType) -> Result<u32, Error>;
 
     fn dir_get_ino(dir: &Self::DirType) -> u32;
 

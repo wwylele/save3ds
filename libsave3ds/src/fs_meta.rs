@@ -354,7 +354,6 @@ impl<
 }
 
 pub struct FileMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType> {
-    key: FileKeyType,
     ticket: RefTicket<FileKeyType, FileInfoType>,
     fs: Rc<FsMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>>,
 }
@@ -370,9 +369,8 @@ impl<
         fs: Rc<FsMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>>,
         ino: u32,
     ) -> Result<Self, Error> {
-        let (_, key) = fs.files.get_at(ino)?;
         let ticket = fs.files.acquire_ticket(ino);
-        Ok(FileMeta { key, ticket, fs })
+        Ok(FileMeta { ticket, fs })
     }
 
     pub fn rename(
@@ -386,8 +384,9 @@ impl<
         Ok(())
     }
 
-    pub fn get_parent_ino(&self) -> u32 {
-        self.key.get_parent()
+    pub fn get_parent_ino(&self) -> Result<u32, Error> {
+        let (_, key) = self.fs.files.get_at(self.ticket.index)?;
+        Ok(key.get_parent())
     }
 
     pub fn get_ino(&self) -> u32 {
@@ -409,7 +408,7 @@ impl<
         self.ticket.check_exclusive()?;
         let (self_info, _) = self.fs.files.get_at(self.ticket.index)?;
 
-        let parent_index = self.key.get_parent();
+        let parent_index = self.get_parent_ino()?;
         let (mut parent, _) = self.fs.dirs.get_at(parent_index)?;
         let mut head_index = parent.get_sub_file();
         if head_index == self.ticket.index {
@@ -440,7 +439,6 @@ impl<
 }
 
 pub struct DirMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType> {
-    key: DirKeyType,
     ticket: RefTicket<DirKeyType, DirInfoType>,
     fs: Rc<FsMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>>,
 }
@@ -455,18 +453,16 @@ impl<
     pub fn open_root(
         fs: Rc<FsMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>>,
     ) -> Result<Self, Error> {
-        let (_, key) = fs.dirs.get_at(1)?;
         let ticket = fs.dirs.acquire_ticket(1);
-        Ok(DirMeta { key, ticket, fs })
+        Ok(DirMeta { ticket, fs })
     }
 
     pub fn open_ino(
         fs: Rc<FsMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>>,
         ino: u32,
     ) -> Result<Self, Error> {
-        let (_, key) = fs.dirs.get_at(ino)?;
         let ticket = fs.dirs.acquire_ticket(ino);
-        Ok(DirMeta { key, ticket, fs })
+        Ok(DirMeta { ticket, fs })
     }
 
     pub fn rename(
@@ -480,8 +476,9 @@ impl<
         Ok(())
     }
 
-    pub fn get_parent_ino(&self) -> u32 {
-        self.key.get_parent()
+    pub fn get_parent_ino(&self) -> Result<u32, Error> {
+        let (_, key) = self.fs.dirs.get_at(self.ticket.index)?;
+        Ok(key.get_parent())
     }
 
     pub fn get_ino(&self) -> u32 {
@@ -493,7 +490,6 @@ impl<
         let (_, pos) = self.fs.dirs.get(&key)?;
         let ticket = self.fs.dirs.acquire_ticket(pos);
         Ok(DirMeta {
-            key,
             ticket,
             fs: self.fs.clone(),
         })
@@ -507,7 +503,6 @@ impl<
         let (_, pos) = self.fs.files.get(&key)?;
         let ticket = self.fs.files.acquire_ticket(pos);
         Ok(FileMeta {
-            key,
             ticket,
             fs: self.fs.clone(),
         })
@@ -563,7 +558,6 @@ impl<
         self.fs.dirs.set(self.ticket.index, self_info.clone())?;
         let ticket = self.fs.dirs.acquire_ticket(pos);
         Ok(DirMeta {
-            key,
             ticket,
             fs: self.fs.clone(),
         })
@@ -582,7 +576,6 @@ impl<
         self.fs.dirs.set(self.ticket.index, self_info.clone())?;
         let ticket = self.fs.files.acquire_ticket(pos);
         Ok(FileMeta {
-            key,
             ticket,
             fs: self.fs.clone(),
         })
@@ -606,7 +599,7 @@ impl<
     fn delete_impl(&self) -> Result<(), Error> {
         self.ticket.check_exclusive()?;
         let (self_info, _) = self.fs.dirs.get_at(self.ticket.index)?;
-        let parent_index = self.key.get_parent();
+        let parent_index = self.get_parent_ino()?;
         let (mut parent, _) = self.fs.dirs.get_at(parent_index)?;
         let mut head_index = parent.get_sub_dir();
         if head_index == self.ticket.index {
