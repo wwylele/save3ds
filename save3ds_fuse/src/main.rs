@@ -26,13 +26,189 @@ enum FileSystemOperation {
     Import,
 }
 
+fn extract_impl<T: file_system::FileSystem>(
+    save: &Rc<T::CenterType>,
+    dir: T::DirType,
+    path: &std::path::Path,
+    indent: u32,
+) -> Result<(), Error>
+where
+    T::NameType: NameConvert + Clone,
+{
+    if !path.exists() {
+        std::fs::create_dir(path)?;
+    }
+
+    for (name, ino) in T::list_sub_dir(&dir)? {
+        let name = T::NameType::name_3ds_to_str(&name);
+        for _ in 0..indent {
+            print!(" ");
+        }
+        println!("+{}", &name);
+        let dir = T::dir_open_ino(save.clone(), ino)?;
+        extract_impl::<T>(&save, dir, &path.join(name), indent + 1)?;
+    }
+
+    for (name, ino) in T::list_sub_file(&dir)? {
+        let name = T::NameType::name_3ds_to_str(&name);
+        for _ in 0..indent {
+            print!(" ");
+        }
+        println!("-{}", &name);
+        let file = T::file_open_ino(save.clone(), ino)?;
+        let mut buffer = vec![0; T::len(&file)];
+        match T::read(&file, 0, &mut buffer) {
+            Ok(()) | Err(Error::HashMismatch) => (),
+            e => return e,
+        }
+        std::fs::write(&path.join(name), &buffer)?;
+    }
+
+    Ok(())
+}
+
+fn extract<T: file_system::FileSystem>(
+    save: &Rc<T::CenterType>,
+    mountpoint: &std::path::Path,
+) -> Result<(), Error>
+where
+    T::NameType: NameConvert + Clone,
+{
+    println!("Extracting...");
+    let root = T::open_root(save.clone())?;
+    extract_impl::<T>(&save, root, mountpoint, 0)?;
+    println!("Finished");
+    Ok(())
+}
+
+fn clear_impl<T: file_system::FileSystem>(
+    save: &Rc<T::CenterType>,
+    dir: &T::DirType,
+) -> Result<(), Error>
+where
+    T::NameType: NameConvert + Clone,
+{
+    for (_, ino) in T::list_sub_dir(&dir)? {
+        let dir = T::dir_open_ino(save.clone(), ino)?;
+        clear_impl::<T>(&save, &dir)?;
+        T::dir_delete(dir)?;
+    }
+
+    for (_, ino) in T::list_sub_file(&dir)? {
+        let file = T::file_open_ino(save.clone(), ino)?;
+        T::file_delete(file)?;
+    }
+
+    Ok(())
+}
+
+fn import_impl<T: file_system::FileSystem>(
+    save: &Rc<T::CenterType>,
+    dir: &T::DirType,
+    path: &std::path::Path,
+) -> Result<(), Error>
+where
+    T::NameType: NameConvert + Clone,
+{
+    for entry in std::fs::read_dir(&path)? {
+        let entry = entry?;
+        println!("{:?}", entry.path());
+        let name = if let Some(name) = entry
+            .path()
+            .file_name()
+            .and_then(OsStr::to_str)
+            .and_then(T::NameType::name_str_to_3ds)
+        {
+            name
+        } else {
+            println!("Name not valid: {:?}", entry.path());
+            continue;
+        };
+
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            let dir = T::new_sub_dir(&dir, name)?;
+            import_impl::<T>(&save, &dir, &entry.path())?
+        } else if file_type.is_file() {
+            let mut host_file = std::fs::File::open(&entry.path())?;
+            let len = host_file.metadata()?.len() as usize;
+            let file = T::new_sub_file(&dir, name, len)?;
+            let mut buffer = vec![0; len];
+            host_file.read_exact(&mut buffer)?;
+            T::write(&file, 0, &buffer)?;
+            T::commit_file(&file)?;
+        } else {
+            println!("Unrecognized file type: {:?}", entry.path());
+        }
+    }
+
+    Ok(())
+}
+
+fn import<T: file_system::FileSystem>(
+    save: &Rc<T::CenterType>,
+    mountpoint: &std::path::Path,
+) -> Result<(), Error>
+where
+    T::NameType: NameConvert + Clone,
+{
+    println!("Clearing the original contents...");
+    let root = T::open_root(save.clone())?;
+    clear_impl::<T>(&save, &root)?;
+    println!("Importing new contents...");
+    import_impl::<T>(&save, &root, mountpoint)?;
+    T::commit(&save)?;
+    println!("Finished");
+    Ok(())
+}
+
+#[allow(unreachable_code, unused_variables, unused_mut)]
+fn do_mount<T: file_system::FileSystem>(
+    save: Rc<T::CenterType>,
+    read_only: bool,
+    mountpoint: &std::path::Path,
+) -> Result<(), Error>
+where
+    T::NameType: NameConvert + Clone,
+{
+    #[cfg(all(unix, feature = "unixfuse"))]
+    {
+        mount(
+            FileSystemFrontend::<T>::new(save, read_only),
+            &mountpoint,
+            &[],
+        )?;
+        return Ok(());
+    }
+    println!("fuse not implemented. Please specify --extract or --import flag");
+    Ok(())
+}
+
+fn start<T: file_system::FileSystem>(
+    save: Rc<T::CenterType>,
+    operation: FileSystemOperation,
+    mountpoint: &std::path::Path,
+) -> Result<(), Error>
+where
+    T::NameType: NameConvert + Clone,
+{
+    match operation {
+        FileSystemOperation::Mount(read_only) => do_mount::<T>(save, read_only, mountpoint)?,
+        FileSystemOperation::Extract => extract::<T>(&save, mountpoint)?,
+        FileSystemOperation::Import => import::<T>(&save, mountpoint)?,
+    }
+
+    Ok(())
+}
+
+#[cfg(all(unix, feature = "unixfuse"))]
 struct DirEntry {
     ino: u64,
     file_type: FileType,
     name: String,
 }
 
-#[allow(unused)]
+#[cfg(all(unix, feature = "unixfuse"))]
 struct FileSystemFrontend<T: file_system::FileSystem> {
     save: Rc<T::CenterType>,
     read_only: bool,
@@ -43,154 +219,21 @@ struct FileSystemFrontend<T: file_system::FileSystem> {
     gid: u32,
 }
 
+#[cfg(all(unix, feature = "unixfuse"))]
 impl<T: file_system::FileSystem> FileSystemFrontend<T>
 where
     T::NameType: NameConvert + Clone,
 {
-    fn new(save: Rc<T::CenterType>) -> FileSystemFrontend<T> {
+    fn new(save: Rc<T::CenterType>, read_only: bool) -> FileSystemFrontend<T> {
         FileSystemFrontend::<T> {
             save,
             file_fh_map: HashMap::new(),
             dir_fh_map: HashMap::new(),
             next_fh: 1,
-            read_only: true,
+            read_only: read_only,
             uid: 0,
             gid: 0,
         }
-    }
-
-    fn extract_impl(
-        &self,
-        dir: T::DirType,
-        path: &std::path::Path,
-        indent: u32,
-    ) -> Result<(), Error> {
-        if !path.exists() {
-            std::fs::create_dir(path)?;
-        }
-
-        for (name, ino) in T::list_sub_dir(&dir)? {
-            let name = T::NameType::name_3ds_to_str(&name);
-            for _ in 0..indent {
-                print!(" ");
-            }
-            println!("+{}", &name);
-            let dir = T::dir_open_ino(self.save.clone(), ino)?;
-            self.extract_impl(dir, &path.join(name), indent + 1)?;
-        }
-
-        for (name, ino) in T::list_sub_file(&dir)? {
-            let name = T::NameType::name_3ds_to_str(&name);
-            for _ in 0..indent {
-                print!(" ");
-            }
-            println!("-{}", &name);
-            let file = T::file_open_ino(self.save.clone(), ino)?;
-            let mut buffer = vec![0; T::len(&file)];
-            match T::read(&file, 0, &mut buffer) {
-                Ok(()) | Err(Error::HashMismatch) => (),
-                e => return e,
-            }
-            std::fs::write(&path.join(name), &buffer)?;
-        }
-
-        Ok(())
-    }
-
-    fn extract(&self, mountpoint: &std::path::Path) -> Result<(), Error> {
-        println!("Extracting...");
-        let root = T::open_root(self.save.clone())?;
-        self.extract_impl(root, mountpoint, 0)?;
-        println!("Finished");
-        Ok(())
-    }
-
-    fn clear_impl(&self, dir: &T::DirType) -> Result<(), Error> {
-        for (_, ino) in T::list_sub_dir(&dir)? {
-            let dir = T::dir_open_ino(self.save.clone(), ino)?;
-            self.clear_impl(&dir)?;
-            T::dir_delete(dir)?;
-        }
-
-        for (_, ino) in T::list_sub_file(&dir)? {
-            let file = T::file_open_ino(self.save.clone(), ino)?;
-            T::file_delete(file)?;
-        }
-
-        Ok(())
-    }
-
-    fn import_impl(&self, dir: &T::DirType, path: &std::path::Path) -> Result<(), Error> {
-        for entry in std::fs::read_dir(&path)? {
-            let entry = entry?;
-            println!("{:?}", entry.path());
-            let name = if let Some(name) = entry
-                .path()
-                .file_name()
-                .and_then(OsStr::to_str)
-                .and_then(T::NameType::name_str_to_3ds)
-            {
-                name
-            } else {
-                println!("Name not valid: {:?}", entry.path());
-                continue;
-            };
-
-            let file_type = entry.file_type()?;
-            if file_type.is_dir() {
-                let dir = T::new_sub_dir(&dir, name)?;
-                self.import_impl(&dir, &entry.path())?
-            } else if file_type.is_file() {
-                let mut host_file = std::fs::File::open(&entry.path())?;
-                let len = host_file.metadata()?.len() as usize;
-                let file = T::new_sub_file(&dir, name, len)?;
-                let mut buffer = vec![0; len];
-                host_file.read_exact(&mut buffer)?;
-                T::write(&file, 0, &buffer)?;
-                T::commit_file(&file)?;
-            } else {
-                println!("Unrecognized file type: {:?}", entry.path());
-            }
-        }
-
-        Ok(())
-    }
-
-    fn import(&self, mountpoint: &std::path::Path) -> Result<(), Error> {
-        println!("Clearing the original contents...");
-        let root = T::open_root(self.save.clone())?;
-        self.clear_impl(&root)?;
-        println!("Importing new contents...");
-        self.import_impl(&root, mountpoint)?;
-        T::commit(&self.save)?;
-        println!("Finished");
-        Ok(())
-    }
-
-    #[allow(unreachable_code, unused_variables, unused_mut)]
-    fn mount(mut self, read_only: bool, mountpoint: &std::path::Path) -> Result<(), Error> {
-        #[cfg(all(unix, feature = "unixfuse"))]
-        {
-            self.read_only = read_only;
-            mount(self, &mountpoint, &[])?;
-            return Ok(());
-        }
-        println!("fuse not implemented. Please specify --extract or --import flag");
-        Ok(())
-    }
-
-    fn start(
-        self,
-        operation: FileSystemOperation,
-        mountpoint: &std::path::Path,
-    ) -> Result<(), Error> {
-        match operation {
-            FileSystemOperation::Mount(read_only) => self.mount(read_only, mountpoint)?,
-            FileSystemOperation::Extract => self.extract(mountpoint)?,
-            FileSystemOperation::Import => self.import(mountpoint)?,
-        }
-
-        Ok(())
     }
 }
 
@@ -245,6 +288,7 @@ trait NameConvert {
         Self: Sized;
 }
 
+#[cfg(all(unix, feature = "unixfuse"))]
 fn name_os_to_3ds<T: NameConvert>(name: &OsStr) -> Option<(T, &str)> {
     let s = name.to_str()?;
     let argument_pos = s.find("\\+");
@@ -350,6 +394,7 @@ impl Ino {
     }
 }
 
+#[cfg(all(unix, feature = "unixfuse"))]
 impl<T: file_system::FileSystem> Drop for FileSystemFrontend<T> {
     fn drop(&mut self) {
         if !self.read_only {
@@ -1268,8 +1313,11 @@ fn main() -> Result<(), Box<std::error::Error>> {
             "WARNING: After modification, you need to sign the CMAC header using other tools."
         );
 
-        FileSystemFrontend::<SaveDataFileSystem>::new(resource.open_bare_save(&bare, !read_only)?)
-            .start(operation, mountpoint)?
+        start::<SaveDataFileSystem>(
+            resource.open_bare_save(&bare, !read_only)?,
+            operation,
+            mountpoint,
+        )?
     } else if let Some(id) = nand_save_id {
         let id = u32::from_str_radix(&id, 16)?;
         if let Some(format_param) = format_param {
@@ -1279,8 +1327,11 @@ fn main() -> Result<(), Box<std::error::Error>> {
             println!("Formatting done");
         }
 
-        FileSystemFrontend::<SaveDataFileSystem>::new(resource.open_nand_save(id, !read_only)?)
-            .start(operation, mountpoint)?
+        start::<SaveDataFileSystem>(
+            resource.open_nand_save(id, !read_only)?,
+            operation,
+            mountpoint,
+        )?
     } else if let Some(id) = sd_save_id {
         let id = u64::from_str_radix(&id, 16)?;
         if let Some(format_param) = format_param {
@@ -1290,8 +1341,11 @@ fn main() -> Result<(), Box<std::error::Error>> {
             println!("Formatting done");
         }
 
-        FileSystemFrontend::<SaveDataFileSystem>::new(resource.open_sd_save(id, !read_only)?)
-            .start(operation, mountpoint)?
+        start::<SaveDataFileSystem>(
+            resource.open_sd_save(id, !read_only)?,
+            operation,
+            mountpoint,
+        )?
     } else if let Some(id) = sd_ext_id {
         let id = u64::from_str_radix(&id, 16)?;
         if let Some(format_param) = format_param {
@@ -1301,8 +1355,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
             println!("Formatting done");
         }
 
-        FileSystemFrontend::<ExtDataFileSystem>::new(resource.open_sd_ext(id, !read_only)?)
-            .start(operation, mountpoint)?
+        start::<ExtDataFileSystem>(resource.open_sd_ext(id, !read_only)?, operation, mountpoint)?
     } else if let Some(id) = nand_ext_id {
         let id = u64::from_str_radix(&id, 16)?;
         if let Some(format_param) = format_param {
@@ -1312,8 +1365,11 @@ fn main() -> Result<(), Box<std::error::Error>> {
             println!("Formatting done");
         }
 
-        FileSystemFrontend::<ExtDataFileSystem>::new(resource.open_nand_ext(id, !read_only)?)
-            .start(operation, mountpoint)?
+        start::<ExtDataFileSystem>(
+            resource.open_nand_ext(id, !read_only)?,
+            operation,
+            mountpoint,
+        )?
     } else if let Some(db_type) = db_type {
         let db_type = match db_type.as_ref() {
             "nandtitle" => DbType::NandTitle,
@@ -1329,8 +1385,11 @@ fn main() -> Result<(), Box<std::error::Error>> {
             }
         };
 
-        FileSystemFrontend::<DbFileSystem>::new(resource.open_db(db_type, !read_only)?)
-            .start(operation, mountpoint)?
+        start::<DbFileSystem>(
+            resource.open_db(db_type, !read_only)?,
+            operation,
+            mountpoint,
+        )?
     } else {
         panic!()
     };
