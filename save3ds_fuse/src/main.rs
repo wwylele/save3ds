@@ -26,11 +26,18 @@ enum FileSystemOperation {
     Import,
 }
 
+struct DirEntry {
+    ino: u64,
+    file_type: FileType,
+    name: String,
+}
+
 #[allow(unused)]
 struct FileSystemFrontend<T: file_system::FileSystem> {
     save: Rc<T::CenterType>,
     read_only: bool,
-    fh_map: HashMap<u64, T::FileType>,
+    file_fh_map: HashMap<u64, T::FileType>,
+    dir_fh_map: HashMap<u64, Vec<DirEntry>>,
     next_fh: u64,
     uid: u32,
     gid: u32,
@@ -43,7 +50,8 @@ where
     fn new(save: Rc<T::CenterType>) -> FileSystemFrontend<T> {
         FileSystemFrontend::<T> {
             save,
-            fh_map: HashMap::new(),
+            file_fh_map: HashMap::new(),
+            dir_fh_map: HashMap::new(),
             next_fh: 1,
             read_only: true,
             uid: 0,
@@ -488,14 +496,14 @@ where
             Ino::File(ino) => {
                 let mut file_holder: Option<T::FileType>;
                 let file = if let Some(fh) = fh {
-                    if let Some(file) = self.fh_map.get_mut(&fh) {
+                    if let Some(file) = self.file_fh_map.get_mut(&fh) {
                         file
                     } else {
                         reply.error(ENOENT);
                         return;
                     }
                 } else if let Some(file) = self
-                    .fh_map
+                    .file_fh_map
                     .iter_mut()
                     .filter(|(_, b)| T::file_get_ino(b) == ino)
                     .map(|(_, b)| b)
@@ -706,7 +714,7 @@ where
         match Ino::from_os(ino) {
             Ino::File(ino) => {
                 if let Ok(file) = T::file_open_ino(self.save.clone(), ino) {
-                    self.fh_map.insert(self.next_fh, file);
+                    self.file_fh_map.insert(self.next_fh, file);
                     reply.opened(self.next_fh, 0);
                     self.next_fh += 1;
                 } else {
@@ -729,7 +737,7 @@ where
         _flush: bool,
         reply: ReplyEmpty,
     ) {
-        if let Some(file) = self.fh_map.remove(&fh) {
+        if let Some(file) = self.file_fh_map.remove(&fh) {
             if !self.read_only {
                 if let Err(e) = T::commit_file(&file) {
                     println!("Failed to save file: {}", e);
@@ -750,7 +758,7 @@ where
     ) {
         let offset = offset as usize;
         let size = size as usize;
-        if let Some(file) = self.fh_map.get(&fh) {
+        if let Some(file) = self.file_fh_map.get(&fh) {
             if size == 0 {
                 reply.data(&[]);
                 return;
@@ -787,7 +795,7 @@ where
 
         let offset = offset as usize;
         let end = offset + data.len();
-        if let Some(mut file) = self.fh_map.get_mut(&fh) {
+        if let Some(mut file) = self.file_fh_map.get_mut(&fh) {
             if data.is_empty() {
                 reply.written(0);
                 return;
@@ -815,14 +823,7 @@ where
         }
     }
 
-    fn readdir(
-        &mut self,
-        _req: &Request,
-        ino: u64,
-        _fh: u64,
-        offset: i64,
-        mut reply: ReplyDirectory,
-    ) {
+    fn opendir(&mut self, _req: &Request, ino: u64, _flags: u32, reply: ReplyOpen) {
         match Ino::from_os(ino) {
             Ino::File(_) => reply.error(ENOTDIR),
             Ino::Dir(ino) => {
@@ -836,12 +837,16 @@ where
                         return;
                     };
                     let mut entries = vec![
-                        (Ino::Dir(ino).to_os(), FileType::Directory, ".".to_owned()),
-                        (
-                            Ino::Dir(parent_ino).to_os(),
-                            FileType::Directory,
-                            "..".to_owned(),
-                        ),
+                        DirEntry {
+                            ino: Ino::Dir(ino).to_os(),
+                            file_type: FileType::Directory,
+                            name: ".".to_owned(),
+                        },
+                        DirEntry {
+                            ino: Ino::Dir(parent_ino).to_os(),
+                            file_type: FileType::Directory,
+                            name: "..".to_owned(),
+                        },
                     ];
 
                     let sub_dirs = if let Ok(r) = T::list_sub_dir(&dir) {
@@ -851,11 +856,11 @@ where
                         return;
                     };
                     for (name, i) in sub_dirs {
-                        entries.push((
-                            Ino::Dir(i).to_os(),
-                            FileType::Directory,
-                            T::NameType::name_3ds_to_str(&name),
-                        ));
+                        entries.push(DirEntry {
+                            ino: Ino::Dir(i).to_os(),
+                            file_type: FileType::Directory,
+                            name: T::NameType::name_3ds_to_str(&name),
+                        });
                     }
 
                     let sub_files = if let Ok(r) = T::list_sub_file(&dir) {
@@ -865,24 +870,46 @@ where
                         return;
                     };
                     for (name, i) in sub_files {
-                        entries.push((
-                            Ino::File(i).to_os(),
-                            FileType::RegularFile,
-                            T::NameType::name_3ds_to_str(&name),
-                        ));
+                        entries.push(DirEntry {
+                            ino: Ino::File(i).to_os(),
+                            file_type: FileType::RegularFile,
+                            name: T::NameType::name_3ds_to_str(&name),
+                        });
                     }
 
-                    for (i, entry) in entries.into_iter().enumerate().skip(offset as usize) {
-                        if reply.add(entry.0, (i + 1) as i64, entry.1, entry.2) {
-                            break;
-                        }
-                    }
-                    reply.ok();
+                    self.dir_fh_map.insert(self.next_fh, entries);
+                    reply.opened(self.next_fh, 0);
+                    self.next_fh += 1;
                 } else {
                     reply.error(ENOENT);
                 }
             }
         }
+    }
+
+    fn readdir(
+        &mut self,
+        _req: &Request,
+        _ino: u64,
+        fh: u64,
+        offset: i64,
+        mut reply: ReplyDirectory,
+    ) {
+        if let Some(entries) = self.dir_fh_map.get(&fh) {
+            for (i, entry) in entries.iter().enumerate().skip(offset as usize) {
+                if reply.add(entry.ino, (i + 1) as i64, entry.file_type, &entry.name) {
+                    break;
+                }
+            }
+            reply.ok();
+        } else {
+            reply.error(EBADF);
+        }
+    }
+
+    fn releasedir(&mut self, _req: &Request, _ino: u64, fh: u64, _flags: u32, reply: ReplyEmpty) {
+        self.dir_fh_map.remove(&fh);
+        reply.ok();
     }
 
     fn rename(
