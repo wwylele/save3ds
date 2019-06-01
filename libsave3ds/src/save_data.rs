@@ -546,6 +546,8 @@ impl FileSystem for SaveDataFileSystem {
             return Ok(());
         }
 
+        file.meta.check_exclusive()?;
+
         let mut info = file.meta.get_info()?;
 
         if file.len == 0 {

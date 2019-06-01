@@ -605,6 +605,7 @@ impl FileSystem for ExtDataFileSystem {
         if buf.is_empty() {
             return Ok(());
         }
+        file.meta.check_exclusive()?;
         file.data.partition().write(pos, buf)
     }
 
@@ -698,17 +699,7 @@ impl FileSystem for ExtDataFileSystem {
                 padding2: 0,
             },
         )?;
-        match File::from_meta(
-            dir.center.clone(),
-            dir.meta.open_sub_file(name)?,
-            Some((len, unique_id)),
-        ) {
-            Ok(file) => Ok(file),
-            Err(e) => {
-                meta.delete()?;
-                Err(e)
-            }
-        }
+        File::from_meta(dir.center.clone(), meta, Some((len, unique_id)))
     }
 
     fn dir_delete(dir: Self::DirType) -> Result<(), Error> {
@@ -720,6 +711,7 @@ impl FileSystem for ExtDataFileSystem {
     }
 
     fn commit_file(file: &Self::FileType) -> Result<(), Error> {
+        file.meta.check_exclusive()?;
         file.data.commit()
     }
 }
