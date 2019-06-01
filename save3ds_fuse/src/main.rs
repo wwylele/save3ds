@@ -872,9 +872,10 @@ where
                         ));
                     }
 
-                    let to_skip = if offset == 0 { offset } else { offset + 1 } as usize;
-                    for (i, entry) in entries.into_iter().enumerate().skip(to_skip) {
-                        reply.add(entry.0, i as i64, entry.1, entry.2);
+                    for (i, entry) in entries.into_iter().enumerate().skip(offset as usize) {
+                        if reply.add(entry.0, (i + 1) as i64, entry.1, entry.2) {
+                            break;
+                        }
                     }
                     reply.ok();
                 } else {
