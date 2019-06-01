@@ -379,6 +379,8 @@ impl<
         name: FileKeyType::NameType,
     ) -> Result<(), Error> {
         let (info, _) = self.fs.files.get_at(self.ticket.index)?;
+        // Note: we don't check_exclusive on rename
+        // because the consecutive delete-new operation preserves ino
         self.delete_impl()?;
         *self = parent.new_sub_file(name, info)?;
         Ok(())
@@ -402,10 +404,10 @@ impl<
     }
 
     pub fn delete(self) -> Result<(), Error> {
+        self.ticket.check_exclusive()?;
         self.delete_impl()
     }
     fn delete_impl(&self) -> Result<(), Error> {
-        self.ticket.check_exclusive()?;
         let (self_info, _) = self.fs.files.get_at(self.ticket.index)?;
 
         let parent_index = self.get_parent_ino()?;
@@ -471,6 +473,8 @@ impl<
         name: DirKeyType::NameType,
     ) -> Result<(), Error> {
         let (info, _) = self.fs.dirs.get_at(self.ticket.index)?;
+        // Note: we don't check_exclusive on rename
+        // because the consecutive delete-new operation preserves ino
         self.delete_impl()?;
         *self = parent.new_sub_dir_impl(name, info, false)?;
         Ok(())
@@ -582,6 +586,7 @@ impl<
     }
 
     pub fn delete(self) -> Result<(), Error> {
+        self.ticket.check_exclusive()?;
         let (self_info, _) = self.fs.dirs.get_at(self.ticket.index)?;
         if self.ticket.index == 1 {
             return make_error(Error::DeletingRoot);
@@ -597,7 +602,6 @@ impl<
     }
 
     fn delete_impl(&self) -> Result<(), Error> {
-        self.ticket.check_exclusive()?;
         let (self_info, _) = self.fs.dirs.get_at(self.ticket.index)?;
         let parent_index = self.get_parent_ino()?;
         let (mut parent, _) = self.fs.dirs.get_at(parent_index)?;
