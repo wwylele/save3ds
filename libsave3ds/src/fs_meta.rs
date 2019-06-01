@@ -1,6 +1,8 @@
 use crate::error::*;
 use crate::random_access_file::*;
 use byte_struct::*;
+use std::cell::*;
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::rc::Rc;
 
@@ -55,6 +57,36 @@ struct U32le {
     v: u32,
 }
 
+struct RefTicket<KeyType, InfoType> {
+    index: u32,
+    ref_count: Rc<RefCell<HashMap<u32, u32>>>,
+
+    phantom_key: PhantomData<KeyType>,
+    phantom_info: PhantomData<InfoType>,
+}
+
+impl<KeyType, InfoType> Drop for RefTicket<KeyType, InfoType> {
+    fn drop(&mut self) {
+        let mut ref_count = self.ref_count.borrow_mut();
+        let previous = *ref_count.get(&self.index).unwrap();
+        if previous == 1 {
+            ref_count.remove(&self.index);
+        } else {
+            ref_count.insert(self.index, previous - 1);
+        }
+    }
+}
+
+impl<KeyType, InfoType> RefTicket<KeyType, InfoType> {
+    pub fn check_exclusive(&self) -> Result<(), Error> {
+        if *self.ref_count.borrow().get(&self.index).unwrap() != 1 {
+            make_error(Error::Busy)
+        } else {
+            Ok(())
+        }
+    }
+}
+
 struct MetaTable<KeyType, InfoType> {
     hash: Rc<RandomAccessFile>,
     table: Rc<RandomAccessFile>,
@@ -64,6 +96,8 @@ struct MetaTable<KeyType, InfoType> {
     entry_len: usize,
     eo_info: usize,
     eo_collision: usize,
+
+    ref_count: Rc<RefCell<HashMap<u32, u32>>>,
 
     phantom_key: PhantomData<KeyType>,
     phantom_info: PhantomData<InfoType>,
@@ -121,6 +155,7 @@ impl<KeyType: ByteStruct + PartialEq, InfoType: ByteStruct> MetaTable<KeyType, I
             entry_len,
             eo_info,
             eo_collision,
+            ref_count: Rc::new(RefCell::new(HashMap::new())),
             phantom_key: PhantomData,
             phantom_info: PhantomData,
         })
@@ -231,6 +266,18 @@ impl<KeyType: ByteStruct + PartialEq, InfoType: ByteStruct> MetaTable<KeyType, I
 
         Ok(index)
     }
+
+    pub fn acquire_ticket(&self, index: u32) -> RefTicket<KeyType, InfoType> {
+        let mut ref_count = self.ref_count.borrow_mut();
+        let previous = ref_count.get(&index).cloned().unwrap_or(0);
+        ref_count.insert(index, previous + 1);
+        RefTicket {
+            index,
+            ref_count: self.ref_count.clone(),
+            phantom_key: PhantomData,
+            phantom_info: PhantomData,
+        }
+    }
 }
 
 pub trait ParentedKey: ByteStruct + PartialEq + Clone {
@@ -308,7 +355,7 @@ impl<
 
 pub struct FileMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType> {
     key: FileKeyType,
-    pos: u32,
+    ticket: RefTicket<FileKeyType, FileInfoType>,
     fs: Rc<FsMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>>,
 }
 
@@ -324,7 +371,8 @@ impl<
         ino: u32,
     ) -> Result<Self, Error> {
         let (_, key) = fs.files.get_at(ino)?;
-        Ok(FileMeta { key, pos: ino, fs })
+        let ticket = fs.files.acquire_ticket(ino);
+        Ok(FileMeta { key, ticket, fs })
     }
 
     pub fn rename(
@@ -332,7 +380,7 @@ impl<
         parent: &DirMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>,
         name: FileKeyType::NameType,
     ) -> Result<(), Error> {
-        let (info, _) = self.fs.files.get_at(self.pos)?;
+        let (info, _) = self.fs.files.get_at(self.ticket.index)?;
         self.delete_impl()?;
         *self = parent.new_sub_file(name, info)?;
         Ok(())
@@ -343,27 +391,28 @@ impl<
     }
 
     pub fn get_ino(&self) -> u32 {
-        self.pos
+        self.ticket.index
     }
 
     pub fn get_info(&self) -> Result<FileInfoType, Error> {
-        Ok(self.fs.files.get_at(self.pos)?.0)
+        Ok(self.fs.files.get_at(self.ticket.index)?.0)
     }
 
     pub fn set_info(&self, info: FileInfoType) -> Result<(), Error> {
-        self.fs.files.set(self.pos, info)
+        self.fs.files.set(self.ticket.index, info)
     }
 
     pub fn delete(self) -> Result<(), Error> {
         self.delete_impl()
     }
     fn delete_impl(&self) -> Result<(), Error> {
-        let (self_info, _) = self.fs.files.get_at(self.pos)?;
+        self.ticket.check_exclusive()?;
+        let (self_info, _) = self.fs.files.get_at(self.ticket.index)?;
 
         let parent_index = self.key.get_parent();
         let (mut parent, _) = self.fs.dirs.get_at(parent_index)?;
         let mut head_index = parent.get_sub_file();
-        if head_index == self.pos {
+        if head_index == self.ticket.index {
             parent.set_sub_file(self_info.get_next());
             self.fs.dirs.set(parent_index, parent)?;
         } else {
@@ -371,7 +420,7 @@ impl<
                 assert!(head_index != 0);
                 let (mut head, _) = self.fs.files.get_at(head_index)?;
                 let next_index = head.get_next();
-                if next_index == self.pos {
+                if next_index == self.ticket.index {
                     head.set_next(self_info.get_next());
                     self.fs.files.set(head_index, head)?;
                     break;
@@ -380,15 +429,19 @@ impl<
             }
         }
 
-        self.fs.files.remove(self.pos)?;
+        self.fs.files.remove(self.ticket.index)?;
 
         Ok(())
+    }
+
+    pub fn check_exclusive(&self) -> Result<(), Error> {
+        self.ticket.check_exclusive()
     }
 }
 
 pub struct DirMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType> {
     key: DirKeyType,
-    pos: u32,
+    ticket: RefTicket<DirKeyType, DirInfoType>,
     fs: Rc<FsMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>>,
 }
 
@@ -403,7 +456,8 @@ impl<
         fs: Rc<FsMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>>,
     ) -> Result<Self, Error> {
         let (_, key) = fs.dirs.get_at(1)?;
-        Ok(DirMeta { key, pos: 1, fs })
+        let ticket = fs.dirs.acquire_ticket(1);
+        Ok(DirMeta { key, ticket, fs })
     }
 
     pub fn open_ino(
@@ -411,7 +465,8 @@ impl<
         ino: u32,
     ) -> Result<Self, Error> {
         let (_, key) = fs.dirs.get_at(ino)?;
-        Ok(DirMeta { key, pos: ino, fs })
+        let ticket = fs.dirs.acquire_ticket(ino);
+        Ok(DirMeta { key, ticket, fs })
     }
 
     pub fn rename(
@@ -419,7 +474,7 @@ impl<
         parent: &DirMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>,
         name: DirKeyType::NameType,
     ) -> Result<(), Error> {
-        let (info, _) = self.fs.dirs.get_at(self.pos)?;
+        let (info, _) = self.fs.dirs.get_at(self.ticket.index)?;
         self.delete_impl()?;
         *self = parent.new_sub_dir_impl(name, info, false)?;
         Ok(())
@@ -430,15 +485,16 @@ impl<
     }
 
     pub fn get_ino(&self) -> u32 {
-        self.pos
+        self.ticket.index
     }
 
     pub fn open_sub_dir(&self, name: DirKeyType::NameType) -> Result<Self, Error> {
-        let key = DirKeyType::new(self.pos, name);
+        let key = DirKeyType::new(self.ticket.index, name);
         let (_, pos) = self.fs.dirs.get(&key)?;
+        let ticket = self.fs.dirs.acquire_ticket(pos);
         Ok(DirMeta {
             key,
-            pos,
+            ticket,
             fs: self.fs.clone(),
         })
     }
@@ -447,17 +503,18 @@ impl<
         &self,
         name: FileKeyType::NameType,
     ) -> Result<FileMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>, Error> {
-        let key = FileKeyType::new(self.pos, name);
+        let key = FileKeyType::new(self.ticket.index, name);
         let (_, pos) = self.fs.files.get(&key)?;
+        let ticket = self.fs.files.acquire_ticket(pos);
         Ok(FileMeta {
             key,
-            pos,
+            ticket,
             fs: self.fs.clone(),
         })
     }
 
     pub fn list_sub_dir(&self) -> Result<Vec<(DirKeyType::NameType, u32)>, Error> {
-        let (self_info, _) = self.fs.dirs.get_at(self.pos)?;
+        let (self_info, _) = self.fs.dirs.get_at(self.ticket.index)?;
         let mut index = self_info.get_sub_dir();
         let mut result = vec![];
         while index != 0 {
@@ -469,7 +526,7 @@ impl<
     }
 
     pub fn list_sub_file(&self) -> Result<Vec<(FileKeyType::NameType, u32)>, Error> {
-        let (self_info, _) = self.fs.dirs.get_at(self.pos)?;
+        let (self_info, _) = self.fs.dirs.get_at(self.ticket.index)?;
         let mut index = self_info.get_sub_file();
         let mut result = vec![];
         while index != 0 {
@@ -494,8 +551,8 @@ impl<
         mut info: DirInfoType,
         reset_sub_info: bool,
     ) -> Result<Self, Error> {
-        let (mut self_info, _) = self.fs.dirs.get_at(self.pos)?;
-        let key = DirKeyType::new(self.pos, name);
+        let (mut self_info, _) = self.fs.dirs.get_at(self.ticket.index)?;
+        let key = DirKeyType::new(self.ticket.index, name);
         info.set_next(self_info.get_sub_dir());
         if reset_sub_info {
             info.set_sub_dir(0);
@@ -503,10 +560,11 @@ impl<
         }
         let pos = self.fs.dirs.add(key.clone(), info)?;
         self_info.set_sub_dir(pos);
-        self.fs.dirs.set(self.pos, self_info.clone())?;
+        self.fs.dirs.set(self.ticket.index, self_info.clone())?;
+        let ticket = self.fs.dirs.acquire_ticket(pos);
         Ok(DirMeta {
             key,
-            pos,
+            ticket,
             fs: self.fs.clone(),
         })
     }
@@ -516,22 +574,23 @@ impl<
         name: FileKeyType::NameType,
         mut info: FileInfoType,
     ) -> Result<FileMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>, Error> {
-        let (mut self_info, _) = self.fs.dirs.get_at(self.pos)?;
-        let key = FileKeyType::new(self.pos, name);
+        let (mut self_info, _) = self.fs.dirs.get_at(self.ticket.index)?;
+        let key = FileKeyType::new(self.ticket.index, name);
         info.set_next(self_info.get_sub_file());
         let pos = self.fs.files.add(key.clone(), info)?;
         self_info.set_sub_file(pos);
-        self.fs.dirs.set(self.pos, self_info.clone())?;
+        self.fs.dirs.set(self.ticket.index, self_info.clone())?;
+        let ticket = self.fs.files.acquire_ticket(pos);
         Ok(FileMeta {
             key,
-            pos,
+            ticket,
             fs: self.fs.clone(),
         })
     }
 
     pub fn delete(self) -> Result<(), Error> {
-        let (self_info, _) = self.fs.dirs.get_at(self.pos)?;
-        if self.pos == 1 {
+        let (self_info, _) = self.fs.dirs.get_at(self.ticket.index)?;
+        if self.ticket.index == 1 {
             return make_error(Error::DeletingRoot);
         }
         if self_info.get_sub_dir() != 0 {
@@ -545,11 +604,12 @@ impl<
     }
 
     fn delete_impl(&self) -> Result<(), Error> {
-        let (self_info, _) = self.fs.dirs.get_at(self.pos)?;
+        self.ticket.check_exclusive()?;
+        let (self_info, _) = self.fs.dirs.get_at(self.ticket.index)?;
         let parent_index = self.key.get_parent();
         let (mut parent, _) = self.fs.dirs.get_at(parent_index)?;
         let mut head_index = parent.get_sub_dir();
-        if head_index == self.pos {
+        if head_index == self.ticket.index {
             parent.set_sub_dir(self_info.get_next());
             self.fs.dirs.set(parent_index, parent)?;
         } else {
@@ -557,7 +617,7 @@ impl<
                 assert!(head_index != 0);
                 let (mut head, _) = self.fs.dirs.get_at(head_index)?;
                 let next_index = head.get_next();
-                if next_index == self.pos {
+                if next_index == self.ticket.index {
                     head.set_next(self_info.get_next());
                     self.fs.dirs.set(head_index, head)?;
                     break;
@@ -566,7 +626,7 @@ impl<
             }
         }
 
-        self.fs.dirs.remove(self.pos)?;
+        self.fs.dirs.remove(self.ticket.index)?;
         Ok(())
     }
 }

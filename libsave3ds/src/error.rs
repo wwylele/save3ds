@@ -19,6 +19,7 @@ pub enum Error {
     Unsupported,
     UniqueIdMismatch,
     BrokenOtp,
+    Busy,
 }
 
 impl fmt::Display for Error {
