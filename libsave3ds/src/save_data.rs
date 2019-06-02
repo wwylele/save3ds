@@ -506,6 +506,9 @@ impl FileSystemFile for File {
     type DirType = Dir;
 
     fn rename(&mut self, parent: &Self::DirType, name: [u8; 16]) -> Result<(), Error> {
+        if parent.meta.open_sub_file(name).is_ok() || parent.meta.open_sub_dir(name).is_ok() {
+            return make_error(Error::AlreadyExist);
+        }
         self.meta.rename(&parent.meta, name)
     }
 
@@ -599,7 +602,7 @@ impl FileSystemDir for Dir {
     type FileType = File;
 
     fn rename(&mut self, parent: &Self, name: [u8; 16]) -> Result<(), Error> {
-        if parent.open_sub_file(name).is_ok() || parent.open_sub_dir(name).is_ok() {
+        if parent.meta.open_sub_file(name).is_ok() || parent.meta.open_sub_dir(name).is_ok() {
             return make_error(Error::AlreadyExist);
         }
         self.meta.rename(&parent.meta, name)
@@ -633,7 +636,7 @@ impl FileSystemDir for Dir {
     }
 
     fn new_sub_dir(&self, name: [u8; 16]) -> Result<Self, Error> {
-        if self.open_sub_file(name).is_ok() || self.open_sub_dir(name).is_ok() {
+        if self.meta.open_sub_file(name).is_ok() || self.meta.open_sub_dir(name).is_ok() {
             return make_error(Error::AlreadyExist);
         }
         let dir_info = SaveExtDir {
@@ -649,7 +652,7 @@ impl FileSystemDir for Dir {
     }
 
     fn new_sub_file(&self, name: [u8; 16], len: usize) -> Result<Self::FileType, Error> {
-        if self.open_sub_file(name).is_ok() || self.open_sub_dir(name).is_ok() {
+        if self.meta.open_sub_file(name).is_ok() || self.meta.open_sub_dir(name).is_ok() {
             return make_error(Error::AlreadyExist);
         }
         let (fat_file, block) = if len == 0 {

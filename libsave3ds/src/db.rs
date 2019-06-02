@@ -340,6 +340,9 @@ impl FileSystemFile for File {
     type DirType = Dir;
 
     fn rename(&mut self, parent: &Self::DirType, name: u64) -> Result<(), Error> {
+        if parent.meta.open_sub_file(name).is_ok() {
+            return make_error(Error::AlreadyExist);
+        }
         self.meta.rename(&parent.meta, name)
     }
 
