@@ -99,7 +99,7 @@ pub struct ExtDataFormatParam {
     pub file_buckets: usize,
 }
 
-pub struct ExtData {
+struct ExtDataInner {
     sd_nand: Rc<SdNandFileSystem>,
     base_path: Vec<String>,
     id: u64,
@@ -108,6 +108,10 @@ pub struct ExtData {
     quota_file: Option<Diff>,
     key: [u8; 16],
     write: bool,
+}
+
+pub struct ExtData {
+    center: Rc<ExtDataInner>,
 }
 
 impl ExtData {
@@ -334,7 +338,7 @@ impl ExtData {
         key: [u8; 16],
         has_quota: bool,
         write: bool,
-    ) -> Result<Rc<ExtData>, Error> {
+    ) -> Result<ExtData, Error> {
         let id_high = format!("{:08x}", id >> 32);
         let id_low = format!("{:08x}", id & 0xFFFF_FFFF);
         let ext_path: Vec<&str> = base_path
@@ -419,28 +423,30 @@ impl ExtData {
 
         let fs = FsMeta::new(dir_hash, dir_table, file_hash, file_table)?;
 
-        Ok(Rc::new(ExtData {
-            sd_nand,
-            base_path: base_path.iter().map(|s| s.to_string()).collect(),
-            id,
-            fs,
-            meta_file,
-            quota_file,
-            key,
-            write,
-        }))
+        Ok(ExtData {
+            center: Rc::new(ExtDataInner {
+                sd_nand,
+                base_path: base_path.iter().map(|s| s.to_string()).collect(),
+                id,
+                fs,
+                meta_file,
+                quota_file,
+                key,
+                write,
+            }),
+        })
     }
 }
 
 pub struct File {
-    center: Rc<ExtData>,
+    center: Rc<ExtDataInner>,
     meta: FileMeta,
     data: Diff,
 }
 
 impl File {
     fn from_meta(
-        center: Rc<ExtData>,
+        center: Rc<ExtDataInner>,
         meta: FileMeta,
         new: Option<(usize, u64)>,
     ) -> Result<File, Error> {
@@ -515,11 +521,6 @@ impl File {
             return make_error(Error::UniqueIdMismatch);
         }
         Ok(File { center, meta, data })
-    }
-
-    pub fn open_ino(center: Rc<ExtData>, ino: u32) -> Result<File, Error> {
-        let meta = FileMeta::open_ino(center.fs.clone(), ino)?;
-        File::from_meta(center, meta, None)
     }
 }
 
@@ -610,7 +611,7 @@ impl FileSystemFile for File {
 }
 
 pub struct Dir {
-    center: Rc<ExtData>,
+    center: Rc<ExtDataInner>,
     meta: DirMeta,
 }
 
@@ -694,30 +695,26 @@ impl FileSystemDir for Dir {
     }
 }
 
-pub struct ExtDataFileSystem {}
-impl FileSystem for ExtDataFileSystem {
-    type CenterType = ExtData;
+impl FileSystem for ExtData {
     type FileType = File;
     type DirType = Dir;
     type NameType = [u8; 16];
 
-    fn file_open_ino(center: Rc<Self::CenterType>, ino: u32) -> Result<Self::FileType, Error> {
-        let meta = FileMeta::open_ino(center.fs.clone(), ino)?;
-        File::from_meta(center, meta, None)
+    fn open_file(&self, ino: u32) -> Result<Self::FileType, Error> {
+        let meta = FileMeta::open_ino(self.center.fs.clone(), ino)?;
+        File::from_meta(self.center.clone(), meta, None)
     }
 
-    fn open_root(center: Rc<Self::CenterType>) -> Result<Self::DirType, Error> {
-        let meta = DirMeta::open_root(center.fs.clone())?;
-        Ok(Dir { center, meta })
+    fn open_dir(&self, ino: u32) -> Result<Self::DirType, Error> {
+        let meta = DirMeta::open_ino(self.center.fs.clone(), ino)?;
+        Ok(Dir {
+            center: self.center.clone(),
+            meta,
+        })
     }
 
-    fn dir_open_ino(center: Rc<Self::CenterType>, ino: u32) -> Result<Self::DirType, Error> {
-        let meta = DirMeta::open_ino(center.fs.clone(), ino)?;
-        Ok(Dir { center, meta })
-    }
-
-    fn commit(center: &Self::CenterType) -> Result<(), Error> {
-        center.meta_file.commit()
+    fn commit(&self) -> Result<(), Error> {
+        self.center.meta_file.commit()
     }
 }
 

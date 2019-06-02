@@ -1,5 +1,4 @@
 use crate::error::*;
-use std::rc::Rc;
 
 pub trait FileSystemFile {
     type NameType;
@@ -43,24 +42,14 @@ pub trait FileSystemDir {
 
 #[allow(unused_variables)]
 pub trait FileSystem {
-    type CenterType;
     type FileType: FileSystemFile<NameType = Self::NameType, DirType = Self::DirType>;
     type DirType: FileSystemDir<NameType = Self::NameType, FileType = Self::FileType>;
     type NameType;
 
-    fn file_open_ino(center: Rc<Self::CenterType>, ino: u32) -> Result<Self::FileType, Error> {
-        make_error(Error::Unsupported)
+    fn open_file(&self, ino: u32) -> Result<Self::FileType, Error>;
+    fn open_dir(&self, ino: u32) -> Result<Self::DirType, Error>;
+    fn open_root(&self) -> Result<Self::DirType, Error> {
+        self.open_dir(0)
     }
-
-    fn open_root(center: Rc<Self::CenterType>) -> Result<Self::DirType, Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn dir_open_ino(center: Rc<Self::CenterType>, ino: u32) -> Result<Self::DirType, Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn commit(center: &Self::CenterType) -> Result<(), Error> {
-        Ok(())
-    }
+    fn commit(&self) -> Result<(), Error>;
 }

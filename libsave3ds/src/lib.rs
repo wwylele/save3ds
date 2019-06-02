@@ -197,7 +197,7 @@ impl Resource {
         )
     }
 
-    pub fn open_sd_ext(&self, id: u64, write: bool) -> Result<Rc<ExtData>, Error> {
+    pub fn open_sd_ext(&self, id: u64, write: bool) -> Result<ExtData, Error> {
         ExtData::new(
             self.sd.as_ref().ok_or(Error::Missing)?.clone(),
             &["extdata"],
@@ -237,7 +237,7 @@ impl Resource {
         Ok(())
     }
 
-    pub fn open_sd_save(&self, id: u64, write: bool) -> Result<Rc<SaveData>, Error> {
+    pub fn open_sd_save(&self, id: u64, write: bool) -> Result<SaveData, Error> {
         let id_high = format!("{:08x}", id >> 32);
         let id_low = format!("{:08x}", id & 0xFFFF_FFFF);
         let sub_path = ["title", &id_high, &id_low, "data", "00000001.sav"];
@@ -287,7 +287,7 @@ impl Resource {
         Ok(())
     }
 
-    pub fn open_nand_save(&self, id: u32, write: bool) -> Result<Rc<SaveData>, Error> {
+    pub fn open_nand_save(&self, id: u32, write: bool) -> Result<SaveData, Error> {
         let file = self.nand.as_ref().ok_or(Error::Missing)?.open(
             &[
                 "data",
@@ -315,7 +315,7 @@ impl Resource {
         )
     }
 
-    pub fn open_nand_ext(&self, id: u64, write: bool) -> Result<Rc<ExtData>, Error> {
+    pub fn open_nand_ext(&self, id: u64, write: bool) -> Result<ExtData, Error> {
         ExtData::new(
             self.nand.as_ref().ok_or(Error::Missing)?.clone(),
             &["data", self.id0.as_ref().ok_or(Error::Missing)?, "extdata"],
@@ -351,7 +351,7 @@ impl Resource {
         Ok(())
     }
 
-    pub fn open_bare_save(&self, path: &str, write: bool) -> Result<Rc<SaveData>, Error> {
+    pub fn open_bare_save(&self, path: &str, write: bool) -> Result<SaveData, Error> {
         let file = Rc::new(DiskFile::new(
             std::fs::OpenOptions::new()
                 .read(true)
@@ -362,7 +362,7 @@ impl Resource {
         SaveData::new(file, SaveDataType::Bare)
     }
 
-    pub fn open_db(&self, db_type: DbType, write: bool) -> Result<Rc<Db>, Error> {
+    pub fn open_db(&self, db_type: DbType, write: bool) -> Result<Db, Error> {
         let (file, key) = match db_type {
             DbType::NandTitle => (
                 self.nand

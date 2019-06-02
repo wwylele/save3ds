@@ -8,7 +8,6 @@ use libsave3ds::Resource;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::io::Read;
-use std::rc::Rc;
 
 #[cfg(all(unix, feature = "unixfuse"))]
 use {
@@ -107,7 +106,7 @@ impl NameConvert for [u8; 16] {
 }
 
 fn extract_impl<T: file_system::FileSystem>(
-    save: &Rc<T::CenterType>,
+    save: &T,
     dir: T::DirType,
     path: &std::path::Path,
     indent: u32,
@@ -125,8 +124,8 @@ where
             print!(" ");
         }
         println!("+{}", &name);
-        let dir = T::dir_open_ino(save.clone(), ino)?;
-        extract_impl::<T>(&save, dir, &path.join(name), indent + 1)?;
+        let dir = save.open_dir(ino)?;
+        extract_impl(save, dir, &path.join(name), indent + 1)?;
     }
 
     for (name, ino) in dir.list_sub_file()? {
@@ -135,7 +134,7 @@ where
             print!(" ");
         }
         println!("-{}", &name);
-        let file = T::file_open_ino(save.clone(), ino)?;
+        let file = save.open_file(ino)?;
         let mut buffer = vec![0; file.len()];
         match file.read(0, &mut buffer) {
             Ok(()) | Err(Error::HashMismatch) => (),
@@ -147,35 +146,29 @@ where
     Ok(())
 }
 
-fn extract<T: file_system::FileSystem>(
-    save: &Rc<T::CenterType>,
-    mountpoint: &std::path::Path,
-) -> Result<(), Error>
+fn extract<T: file_system::FileSystem>(save: T, mountpoint: &std::path::Path) -> Result<(), Error>
 where
     T::NameType: NameConvert + Clone,
 {
     println!("Extracting...");
-    let root = T::open_root(save.clone())?;
-    extract_impl::<T>(&save, root, mountpoint, 0)?;
+    let root = save.open_root()?;
+    extract_impl(&save, root, mountpoint, 0)?;
     println!("Finished");
     Ok(())
 }
 
-fn clear_impl<T: file_system::FileSystem>(
-    save: &Rc<T::CenterType>,
-    dir: &T::DirType,
-) -> Result<(), Error>
+fn clear_impl<T: file_system::FileSystem>(save: &T, dir: &T::DirType) -> Result<(), Error>
 where
     T::NameType: NameConvert + Clone,
 {
     for (_, ino) in dir.list_sub_dir()? {
-        let dir = T::dir_open_ino(save.clone(), ino)?;
-        clear_impl::<T>(&save, &dir)?;
+        let dir = save.open_dir(ino)?;
+        clear_impl(save, &dir)?;
         dir.delete()?;
     }
 
     for (_, ino) in dir.list_sub_file()? {
-        let file = T::file_open_ino(save.clone(), ino)?;
+        let file = save.open_file(ino)?;
         file.delete()?;
     }
 
@@ -183,7 +176,7 @@ where
 }
 
 fn import_impl<T: file_system::FileSystem>(
-    save: &Rc<T::CenterType>,
+    save: &T,
     dir: &T::DirType,
     path: &std::path::Path,
 ) -> Result<(), Error>
@@ -208,7 +201,7 @@ where
         let file_type = entry.file_type()?;
         if file_type.is_dir() {
             let dir = dir.new_sub_dir(name)?;
-            import_impl::<T>(&save, &dir, &entry.path())?
+            import_impl(save, &dir, &entry.path())?
         } else if file_type.is_file() {
             let mut host_file = std::fs::File::open(&entry.path())?;
             let len = host_file.metadata()?.len() as usize;
@@ -225,26 +218,23 @@ where
     Ok(())
 }
 
-fn import<T: file_system::FileSystem>(
-    save: &Rc<T::CenterType>,
-    mountpoint: &std::path::Path,
-) -> Result<(), Error>
+fn import<T: file_system::FileSystem>(save: T, mountpoint: &std::path::Path) -> Result<(), Error>
 where
     T::NameType: NameConvert + Clone,
 {
     println!("Clearing the original contents...");
-    let root = T::open_root(save.clone())?;
-    clear_impl::<T>(&save, &root)?;
+    let root = save.open_root()?;
+    clear_impl(&save, &root)?;
     println!("Importing new contents...");
-    import_impl::<T>(&save, &root, mountpoint)?;
-    T::commit(&save)?;
+    import_impl(&save, &root, mountpoint)?;
+    save.commit()?;
     println!("Finished");
     Ok(())
 }
 
 #[allow(unreachable_code, unused_variables)]
 fn do_mount<T: file_system::FileSystem>(
-    save: Rc<T::CenterType>,
+    save: T,
     read_only: bool,
     mountpoint: &std::path::Path,
 ) -> Result<(), Error>
@@ -253,11 +243,7 @@ where
 {
     #[cfg(all(unix, feature = "unixfuse"))]
     {
-        mount(
-            FileSystemFrontend::<T>::new(save, read_only),
-            &mountpoint,
-            &[],
-        )?;
+        mount(FileSystemFrontend::new(save, read_only), &mountpoint, &[])?;
         return Ok(());
     }
     println!("fuse not implemented. Please specify --extract or --import flag");
@@ -265,7 +251,7 @@ where
 }
 
 fn start<T: file_system::FileSystem>(
-    save: Rc<T::CenterType>,
+    save: T,
     operation: FileSystemOperation,
     mountpoint: &std::path::Path,
 ) -> Result<(), Error>
@@ -273,9 +259,9 @@ where
     T::NameType: NameConvert + Clone,
 {
     match operation {
-        FileSystemOperation::Mount(read_only) => do_mount::<T>(save, read_only, mountpoint)?,
-        FileSystemOperation::Extract => extract::<T>(&save, mountpoint)?,
-        FileSystemOperation::Import => import::<T>(&save, mountpoint)?,
+        FileSystemOperation::Mount(read_only) => do_mount(save, read_only, mountpoint)?,
+        FileSystemOperation::Extract => extract(save, mountpoint)?,
+        FileSystemOperation::Import => import(save, mountpoint)?,
     }
 
     Ok(())
@@ -290,7 +276,7 @@ struct DirEntry {
 
 #[cfg(all(unix, feature = "unixfuse"))]
 struct FileSystemFrontend<T: file_system::FileSystem> {
-    save: Rc<T::CenterType>,
+    save: T,
     read_only: bool,
     file_fh_map: HashMap<u64, T::FileType>,
     dir_fh_map: HashMap<u64, Vec<DirEntry>>,
@@ -304,7 +290,7 @@ impl<T: file_system::FileSystem> FileSystemFrontend<T>
 where
     T::NameType: NameConvert + Clone,
 {
-    fn new(save: Rc<T::CenterType>, read_only: bool) -> FileSystemFrontend<T> {
+    fn new(save: T, read_only: bool) -> FileSystemFrontend<T> {
         FileSystemFrontend::<T> {
             save,
             file_fh_map: HashMap::new(),
@@ -398,7 +384,7 @@ impl Ino {
 impl<T: file_system::FileSystem> Drop for FileSystemFrontend<T> {
     fn drop(&mut self) {
         if !self.read_only {
-            T::commit(self.save.as_ref()).unwrap();
+            self.save.commit().unwrap();
             println!("Saved");
         }
     }
@@ -430,7 +416,7 @@ where
                 reply.error(ENOTDIR);
             }
             Ino::Dir(ino) => {
-                let parent_dir = if let Ok(parent_dir) = T::dir_open_ino(self.save.clone(), ino) {
+                let parent_dir = if let Ok(parent_dir) = self.save.open_dir(ino) {
                     parent_dir
                 } else {
                     reply.error(EIO);
@@ -480,7 +466,7 @@ where
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
         match Ino::from_os(ino) {
             Ino::File(ino) => {
-                if let Ok(file) = T::file_open_ino(self.save.clone(), ino) {
+                if let Ok(file) = self.save.open_file(ino) {
                     reply.attr(
                         &time::Timespec::new(1, 0),
                         &make_file_attr(
@@ -496,7 +482,7 @@ where
                 }
             }
             Ino::Dir(ino) => {
-                if let Ok(dir) = T::dir_open_ino(self.save.clone(), ino) {
+                if let Ok(dir) = self.save.open_dir(ino) {
                     let children_len = if let Ok(chidren) = dir.list_sub_dir() {
                         chidren.len()
                     } else {
@@ -558,7 +544,7 @@ where
                     // TODO: revisit this when implementing safe multi fh
                     println!("Warning: resize when another fh is opened.");
                     file
-                } else if let Ok(file) = T::file_open_ino(self.save.clone(), ino) {
+                } else if let Ok(file) = self.save.open_file(ino) {
                     file_holder = Some(file);
                     file_holder.as_mut().unwrap()
                 } else {
@@ -604,7 +590,7 @@ where
                 reply.error(ENOTDIR);
             }
             Ino::Dir(ino) => {
-                let parent_dir = if let Ok(parent_dir) = T::dir_open_ino(self.save.clone(), ino) {
+                let parent_dir = if let Ok(parent_dir) = self.save.open_dir(ino) {
                     parent_dir
                 } else {
                     reply.error(EIO);
@@ -656,7 +642,7 @@ where
                 reply.error(ENOTDIR);
             }
             Ino::Dir(ino) => {
-                let parent_dir = if let Ok(parent_dir) = T::dir_open_ino(self.save.clone(), ino) {
+                let parent_dir = if let Ok(parent_dir) = self.save.open_dir(ino) {
                     parent_dir
                 } else {
                     reply.error(EIO);
@@ -701,7 +687,7 @@ where
                 reply.error(ENOTDIR);
             }
             Ino::Dir(ino) => {
-                let parent_dir = if let Ok(parent_dir) = T::dir_open_ino(self.save.clone(), ino) {
+                let parent_dir = if let Ok(parent_dir) = self.save.open_dir(ino) {
                     parent_dir
                 } else {
                     reply.error(EIO);
@@ -738,7 +724,7 @@ where
                 reply.error(ENOTDIR);
             }
             Ino::Dir(ino) => {
-                let parent_dir = if let Ok(parent_dir) = T::dir_open_ino(self.save.clone(), ino) {
+                let parent_dir = if let Ok(parent_dir) = self.save.open_dir(ino) {
                     parent_dir
                 } else {
                     reply.error(EIO);
@@ -760,7 +746,7 @@ where
     fn open(&mut self, _req: &Request, ino: u64, _flags: u32, reply: ReplyOpen) {
         match Ino::from_os(ino) {
             Ino::File(ino) => {
-                if let Ok(file) = T::file_open_ino(self.save.clone(), ino) {
+                if let Ok(file) = self.save.open_file(ino) {
                     self.file_fh_map.insert(self.next_fh, file);
                     reply.opened(self.next_fh, 0);
                     self.next_fh += 1;
@@ -874,7 +860,7 @@ where
         match Ino::from_os(ino) {
             Ino::File(_) => reply.error(ENOTDIR),
             Ino::Dir(ino) => {
-                if let Ok(dir) = T::dir_open_ino(self.save.clone(), ino) {
+                if let Ok(dir) = self.save.open_dir(ino) {
                     let parent_ino = if ino == 1 {
                         1
                     } else if let Ok(parent_ino) = dir.get_parent_ino() {
@@ -991,7 +977,7 @@ where
                 reply.error(ENOTDIR);
                 return;
             }
-            Ino::Dir(ino) => match T::dir_open_ino(self.save.clone(), ino) {
+            Ino::Dir(ino) => match self.save.open_dir(ino) {
                 Ok(dir) => dir,
                 Err(_) => {
                     reply.error(EIO);
@@ -1005,7 +991,7 @@ where
                 reply.error(ENOTDIR);
                 return;
             }
-            Ino::Dir(ino) => match T::dir_open_ino(self.save.clone(), ino) {
+            Ino::Dir(ino) => match self.save.open_dir(ino) {
                 Ok(dir) => dir,
                 Err(_) => {
                     reply.error(EIO);
@@ -1313,7 +1299,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
             "WARNING: After modification, you need to sign the CMAC header using other tools."
         );
 
-        start::<SaveDataFileSystem>(
+        start(
             resource.open_bare_save(&bare, !read_only)?,
             operation,
             mountpoint,
@@ -1327,7 +1313,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
             println!("Formatting done");
         }
 
-        start::<SaveDataFileSystem>(
+        start(
             resource.open_nand_save(id, !read_only)?,
             operation,
             mountpoint,
@@ -1341,7 +1327,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
             println!("Formatting done");
         }
 
-        start::<SaveDataFileSystem>(
+        start(
             resource.open_sd_save(id, !read_only)?,
             operation,
             mountpoint,
@@ -1355,7 +1341,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
             println!("Formatting done");
         }
 
-        start::<ExtDataFileSystem>(resource.open_sd_ext(id, !read_only)?, operation, mountpoint)?
+        start(resource.open_sd_ext(id, !read_only)?, operation, mountpoint)?
     } else if let Some(id) = nand_ext_id {
         let id = u64::from_str_radix(&id, 16)?;
         if let Some(format_param) = format_param {
@@ -1365,7 +1351,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
             println!("Formatting done");
         }
 
-        start::<ExtDataFileSystem>(
+        start(
             resource.open_nand_ext(id, !read_only)?,
             operation,
             mountpoint,
@@ -1385,7 +1371,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
             }
         };
 
-        start::<DbFileSystem>(
+        start(
             resource.open_db(db_type, !read_only)?,
             operation,
             mountpoint,

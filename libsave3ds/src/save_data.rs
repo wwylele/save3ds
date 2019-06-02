@@ -83,11 +83,15 @@ struct SaveHeader {
     padding: u32,
 }
 
-pub struct SaveData {
+struct SaveDataInner {
     disa: Rc<Disa>,
     fat: Rc<Fat>,
     fs: Rc<FsMeta>,
     block_len: usize,
+}
+
+pub struct SaveData {
+    center: Rc<SaveDataInner>,
 }
 
 #[derive(Clone)]
@@ -244,7 +248,7 @@ impl SaveData {
         min_block
     }
 
-    pub fn from_vec(v: Vec<u8>, save_data_type: SaveDataType) -> Result<Rc<SaveData>, Error> {
+    pub fn from_vec(v: Vec<u8>, save_data_type: SaveDataType) -> Result<SaveData, Error> {
         let file = Rc::new(MemoryFile::new(v));
         SaveData::new(file, save_data_type)
     }
@@ -395,7 +399,7 @@ impl SaveData {
     pub fn new(
         file: Rc<RandomAccessFile>,
         save_data_type: SaveDataType,
-    ) -> Result<Rc<SaveData>, Error> {
+    ) -> Result<SaveData, Error> {
         let disa = Rc::new(Disa::new(file, SaveData::get_signer(save_data_type))?);
         let header: SaveHeader = read_struct(disa[0].as_ref(), 0)?;
         if header.magic != *b"SAVE" || header.version != 0x40000 {
@@ -460,24 +464,26 @@ impl SaveData {
 
         let fs = FsMeta::new(dir_hash, dir_table, file_hash, file_table)?;
 
-        Ok(Rc::new(SaveData {
-            disa,
-            fat,
-            fs,
-            block_len: fs_info.block_len as usize,
-        }))
+        Ok(SaveData {
+            center: Rc::new(SaveDataInner {
+                disa,
+                fat,
+                fs,
+                block_len: fs_info.block_len as usize,
+            }),
+        })
     }
 }
 
 pub struct File {
-    center: Rc<SaveData>,
+    center: Rc<SaveDataInner>,
     meta: FileMeta,
     data: Option<FatFile>,
     len: usize,
 }
 
 impl File {
-    fn from_meta(center: Rc<SaveData>, meta: FileMeta) -> Result<File, Error> {
+    fn from_meta(center: Rc<SaveDataInner>, meta: FileMeta) -> Result<File, Error> {
         let info = meta.get_info()?;
         let len = info.size as usize;
         let data = if info.block == 0x8000_0000 {
@@ -593,7 +599,7 @@ impl FileSystemFile for File {
 }
 
 pub struct Dir {
-    center: Rc<SaveData>,
+    center: Rc<SaveDataInner>,
     meta: DirMeta,
 }
 
@@ -689,30 +695,26 @@ impl FileSystemDir for Dir {
     }
 }
 
-pub struct SaveDataFileSystem {}
-impl FileSystem for SaveDataFileSystem {
-    type CenterType = SaveData;
+impl FileSystem for SaveData {
     type FileType = File;
     type DirType = Dir;
     type NameType = [u8; 16];
 
-    fn file_open_ino(center: Rc<Self::CenterType>, ino: u32) -> Result<Self::FileType, Error> {
-        let meta = FileMeta::open_ino(center.fs.clone(), ino)?;
-        File::from_meta(center, meta)
+    fn open_file(&self, ino: u32) -> Result<Self::FileType, Error> {
+        let meta = FileMeta::open_ino(self.center.fs.clone(), ino)?;
+        File::from_meta(self.center.clone(), meta)
     }
 
-    fn open_root(center: Rc<Self::CenterType>) -> Result<Self::DirType, Error> {
-        let meta = DirMeta::open_root(center.fs.clone())?;
-        Ok(Dir { center, meta })
+    fn open_dir(&self, ino: u32) -> Result<Self::DirType, Error> {
+        let meta = DirMeta::open_ino(self.center.fs.clone(), ino)?;
+        Ok(Dir {
+            center: self.center.clone(),
+            meta,
+        })
     }
 
-    fn dir_open_ino(center: Rc<Self::CenterType>, ino: u32) -> Result<Self::DirType, Error> {
-        let meta = DirMeta::open_ino(center.fs.clone(), ino)?;
-        Ok(Dir { center, meta })
-    }
-
-    fn commit(center: &Self::CenterType) -> Result<(), Error> {
-        center.disa.commit()
+    fn commit(&self) -> Result<(), Error> {
+        self.center.disa.commit()
     }
 }
 

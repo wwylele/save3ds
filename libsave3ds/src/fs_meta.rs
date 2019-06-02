@@ -452,13 +452,6 @@ impl<
         FileInfoType: FileInfo,
     > DirMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>
 {
-    pub fn open_root(
-        fs: Rc<FsMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>>,
-    ) -> Result<Self, Error> {
-        let ticket = fs.dirs.acquire_ticket(1);
-        Ok(DirMeta { ticket, fs })
-    }
-
     pub fn open_ino(
         fs: Rc<FsMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>>,
         ino: u32,
@@ -705,8 +698,9 @@ mod test {
             }
 
             let mut dirs = vec![Dir {
-                meta: DirMeta::<SaveExtKey, SaveExtDir, SaveExtKey, SaveFile>::open_root(
+                meta: DirMeta::<SaveExtKey, SaveExtDir, SaveExtKey, SaveFile>::open_ino(
                     fs.clone(),
+                    1,
                 )
                 .unwrap(),
                 name: [0; 16],
