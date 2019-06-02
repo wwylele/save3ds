@@ -34,9 +34,7 @@ pub trait FileSystemDir {
     fn new_sub_dir(&self, name: Self::NameType) -> Result<Self, Error>
     where
         Self: Sized;
-    fn new_sub_file(&self, name: Self::NameType, len: usize) -> Result<Self::FileType, Error>
-    where
-        Self: Sized;
+    fn new_sub_file(&self, name: Self::NameType, len: usize) -> Result<Self::FileType, Error>;
     fn delete(self) -> Result<(), Error>;
 }
 
