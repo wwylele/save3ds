@@ -422,6 +422,80 @@ pub struct Dir {
     meta: DirMeta,
 }
 
+impl FileSystemDir for Dir {
+    type NameType = u64;
+    type FileType = File;
+
+    fn get_parent_ino(&self) -> Result<u32, Error> {
+        self.meta.get_parent_ino()
+    }
+
+    fn get_ino(&self) -> u32 {
+        self.meta.get_ino()
+    }
+
+    fn open_sub_file(&self, name: u64) -> Result<Self::FileType, Error> {
+        File::from_meta(self.center.clone(), self.meta.open_sub_file(name)?)
+    }
+
+    fn list_sub_dir(&self) -> Result<Vec<(u64, u32)>, Error> {
+        Ok(vec![])
+    }
+
+    fn list_sub_file(&self) -> Result<Vec<(u64, u32)>, Error> {
+        self.meta.list_sub_file()
+    }
+
+    fn new_sub_file(&self, name: u64, len: usize) -> Result<Self::FileType, Error> {
+        if self.open_sub_file(name).is_ok() || self.open_sub_dir(name).is_ok() {
+            return make_error(Error::AlreadyExist);
+        }
+        let (fat_file, block) = if len == 0 {
+            (None, 0x8000_0000)
+        } else {
+            let (fat_file, block) = FatFile::create(
+                self.center.fat.clone(),
+                divide_up(len, self.center.block_len),
+            )?;
+            (Some(fat_file), block as u32)
+        };
+        match self.meta.new_sub_file(
+            name,
+            DbFile {
+                next: 0,
+                padding1: 0,
+                block: block,
+                size: len as u64,
+                padding2: 0,
+            },
+        ) {
+            Err(e) => {
+                if let Some(f) = fat_file {
+                    f.delete()?;
+                }
+                Err(e)
+            }
+            Ok(meta) => File::from_meta(self.center.clone(), meta),
+        }
+    }
+
+    fn rename(&mut self, _parent: &Self, _name: Self::NameType) -> Result<(), Error> {
+        make_error(Error::Unsupported)
+    }
+
+    fn open_sub_dir(&self, _name: Self::NameType) -> Result<Self, Error> {
+        make_error(Error::NotFound)
+    }
+
+    fn new_sub_dir(&self, _name: Self::NameType) -> Result<Self, Error> {
+        make_error(Error::Unsupported)
+    }
+
+    fn delete(self) -> Result<(), Error> {
+        make_error(Error::DeletingRoot)
+    }
+}
+
 pub struct DbFileSystem {}
 impl FileSystem for DbFileSystem {
     type CenterType = Db;
@@ -442,57 +516,6 @@ impl FileSystem for DbFileSystem {
     fn dir_open_ino(center: Rc<Self::CenterType>, ino: u32) -> Result<Self::DirType, Error> {
         let meta = DirMeta::open_ino(center.fs.clone(), ino)?;
         Ok(Dir { center, meta })
-    }
-
-    fn dir_get_parent_ino(dir: &Self::DirType) -> Result<u32, Error> {
-        dir.meta.get_parent_ino()
-    }
-
-    fn dir_get_ino(dir: &Self::DirType) -> u32 {
-        dir.meta.get_ino()
-    }
-
-    fn open_sub_file(dir: &Self::DirType, name: u64) -> Result<Self::FileType, Error> {
-        File::from_meta(dir.center.clone(), dir.meta.open_sub_file(name)?)
-    }
-
-    fn list_sub_dir(_dir: &Self::DirType) -> Result<Vec<(u64, u32)>, Error> {
-        Ok(vec![])
-    }
-
-    fn list_sub_file(dir: &Self::DirType) -> Result<Vec<(u64, u32)>, Error> {
-        dir.meta.list_sub_file()
-    }
-
-    fn new_sub_file(dir: &Self::DirType, name: u64, len: usize) -> Result<Self::FileType, Error> {
-        if Self::open_sub_file(dir, name).is_ok() || Self::open_sub_dir(dir, name).is_ok() {
-            return make_error(Error::AlreadyExist);
-        }
-        let (fat_file, block) = if len == 0 {
-            (None, 0x8000_0000)
-        } else {
-            let (fat_file, block) =
-                FatFile::create(dir.center.fat.clone(), divide_up(len, dir.center.block_len))?;
-            (Some(fat_file), block as u32)
-        };
-        match dir.meta.new_sub_file(
-            name,
-            DbFile {
-                next: 0,
-                padding1: 0,
-                block: block,
-                size: len as u64,
-                padding2: 0,
-            },
-        ) {
-            Err(e) => {
-                if let Some(f) = fat_file {
-                    f.delete()?;
-                }
-                Err(e)
-            }
-            Ok(meta) => File::from_meta(dir.center.clone(), meta),
-        }
     }
 
     fn commit(center: &Self::CenterType) -> Result<(), Error> {

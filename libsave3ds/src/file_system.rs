@@ -19,11 +19,33 @@ pub trait FileSystemFile {
     fn commit(&self) -> Result<(), Error>;
 }
 
+pub trait FileSystemDir {
+    type NameType;
+    type FileType;
+
+    fn rename(&mut self, parent: &Self, name: Self::NameType) -> Result<(), Error>;
+    fn get_parent_ino(&self) -> Result<u32, Error>;
+    fn get_ino(&self) -> u32;
+    fn open_sub_dir(&self, name: Self::NameType) -> Result<Self, Error>
+    where
+        Self: Sized;
+    fn open_sub_file(&self, name: Self::NameType) -> Result<Self::FileType, Error>;
+    fn list_sub_dir(&self) -> Result<Vec<(Self::NameType, u32)>, Error>;
+    fn list_sub_file(&self) -> Result<Vec<(Self::NameType, u32)>, Error>;
+    fn new_sub_dir(&self, name: Self::NameType) -> Result<Self, Error>
+    where
+        Self: Sized;
+    fn new_sub_file(&self, name: Self::NameType, len: usize) -> Result<Self::FileType, Error>
+    where
+        Self: Sized;
+    fn delete(self) -> Result<(), Error>;
+}
+
 #[allow(unused_variables)]
 pub trait FileSystem {
     type CenterType;
     type FileType: FileSystemFile<NameType = Self::NameType, DirType = Self::DirType>;
-    type DirType;
+    type DirType: FileSystemDir<NameType = Self::NameType, FileType = Self::FileType>;
     type NameType;
 
     fn file_open_ino(center: Rc<Self::CenterType>, ino: u32) -> Result<Self::FileType, Error> {
@@ -35,50 +57,6 @@ pub trait FileSystem {
     }
 
     fn dir_open_ino(center: Rc<Self::CenterType>, ino: u32) -> Result<Self::DirType, Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn dir_rename(
-        dir: &mut Self::DirType,
-        parent: &Self::DirType,
-        name: Self::NameType,
-    ) -> Result<(), Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn dir_get_parent_ino(dir: &Self::DirType) -> Result<u32, Error>;
-
-    fn dir_get_ino(dir: &Self::DirType) -> u32;
-
-    fn open_sub_dir(dir: &Self::DirType, name: Self::NameType) -> Result<Self::DirType, Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn open_sub_file(dir: &Self::DirType, name: Self::NameType) -> Result<Self::FileType, Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn list_sub_dir(dir: &Self::DirType) -> Result<Vec<(Self::NameType, u32)>, Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn list_sub_file(dir: &Self::DirType) -> Result<Vec<(Self::NameType, u32)>, Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn new_sub_dir(dir: &Self::DirType, name: Self::NameType) -> Result<Self::DirType, Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn new_sub_file(
-        dir: &Self::DirType,
-        name: Self::NameType,
-        len: usize,
-    ) -> Result<Self::FileType, Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn dir_delete(dir: Self::DirType) -> Result<(), Error> {
         make_error(Error::Unsupported)
     }
 

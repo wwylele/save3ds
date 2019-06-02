@@ -611,6 +611,86 @@ pub struct Dir {
     meta: DirMeta,
 }
 
+impl FileSystemDir for Dir {
+    type NameType = [u8; 16];
+    type FileType = File;
+
+    fn rename(&mut self, parent: &Dir, name: [u8; 16]) -> Result<(), Error> {
+        if parent.open_sub_file(name).is_ok() || parent.open_sub_dir(name).is_ok() {
+            return make_error(Error::AlreadyExist);
+        }
+        self.meta.rename(&parent.meta, name)
+    }
+
+    fn get_parent_ino(&self) -> Result<u32, Error> {
+        self.meta.get_parent_ino()
+    }
+
+    fn get_ino(&self) -> u32 {
+        self.meta.get_ino()
+    }
+
+    fn open_sub_dir(&self, name: [u8; 16]) -> Result<Self, Error> {
+        Ok(Dir {
+            center: self.center.clone(),
+            meta: self.meta.open_sub_dir(name)?,
+        })
+    }
+
+    fn open_sub_file(&self, name: [u8; 16]) -> Result<Self::FileType, Error> {
+        File::from_meta(self.center.clone(), self.meta.open_sub_file(name)?, None)
+    }
+
+    fn list_sub_dir(&self) -> Result<Vec<([u8; 16], u32)>, Error> {
+        self.meta.list_sub_dir()
+    }
+
+    fn list_sub_file(&self) -> Result<Vec<([u8; 16], u32)>, Error> {
+        self.meta.list_sub_file()
+    }
+
+    fn new_sub_dir(&self, name: [u8; 16]) -> Result<Self, Error> {
+        if Self::open_sub_file(self, name).is_ok() || Self::open_sub_dir(self, name).is_ok() {
+            return make_error(Error::AlreadyExist);
+        }
+        let dir_info = SaveExtDir {
+            next: 0,
+            sub_dir: 0,
+            sub_file: 0,
+            padding: 0,
+        };
+        Ok(Dir {
+            center: self.center.clone(),
+            meta: self.meta.new_sub_dir(name, dir_info)?,
+        })
+    }
+
+    fn new_sub_file(&self, name: [u8; 16], len: usize) -> Result<Self::FileType, Error> {
+        if self.open_sub_file(name).is_ok() || self.open_sub_dir(name).is_ok() {
+            return make_error(Error::AlreadyExist);
+        }
+        if len == 0 {
+            return make_error(Error::InvalidValue);
+        }
+        let unique_id = 0xDEAD_BEEF;
+        let meta = self.meta.new_sub_file(
+            name,
+            ExtFile {
+                next: 0,
+                padding1: 0,
+                block: 0x8000_0000,
+                unique_id,
+                padding2: 0,
+            },
+        )?;
+        File::from_meta(self.center.clone(), meta, Some((len, unique_id)))
+    }
+
+    fn delete(self) -> Result<(), Error> {
+        self.meta.delete()
+    }
+}
+
 pub struct ExtDataFileSystem {}
 impl FileSystem for ExtDataFileSystem {
     type CenterType = ExtData;
@@ -631,89 +711,6 @@ impl FileSystem for ExtDataFileSystem {
     fn dir_open_ino(center: Rc<Self::CenterType>, ino: u32) -> Result<Self::DirType, Error> {
         let meta = DirMeta::open_ino(center.fs.clone(), ino)?;
         Ok(Dir { center, meta })
-    }
-
-    fn dir_rename(
-        dir: &mut Self::DirType,
-        parent: &Self::DirType,
-        name: [u8; 16],
-    ) -> Result<(), Error> {
-        if Self::open_sub_file(&parent, name).is_ok() || Self::open_sub_dir(&parent, name).is_ok() {
-            return make_error(Error::AlreadyExist);
-        }
-        dir.meta.rename(&parent.meta, name)
-    }
-
-    fn dir_get_parent_ino(dir: &Self::DirType) -> Result<u32, Error> {
-        dir.meta.get_parent_ino()
-    }
-
-    fn dir_get_ino(dir: &Self::DirType) -> u32 {
-        dir.meta.get_ino()
-    }
-
-    fn open_sub_dir(dir: &Self::DirType, name: [u8; 16]) -> Result<Self::DirType, Error> {
-        Ok(Dir {
-            center: dir.center.clone(),
-            meta: dir.meta.open_sub_dir(name)?,
-        })
-    }
-
-    fn open_sub_file(dir: &Self::DirType, name: [u8; 16]) -> Result<Self::FileType, Error> {
-        File::from_meta(dir.center.clone(), dir.meta.open_sub_file(name)?, None)
-    }
-
-    fn list_sub_dir(dir: &Self::DirType) -> Result<Vec<([u8; 16], u32)>, Error> {
-        dir.meta.list_sub_dir()
-    }
-
-    fn list_sub_file(dir: &Self::DirType) -> Result<Vec<([u8; 16], u32)>, Error> {
-        dir.meta.list_sub_file()
-    }
-
-    fn new_sub_dir(dir: &Self::DirType, name: [u8; 16]) -> Result<Self::DirType, Error> {
-        if Self::open_sub_file(dir, name).is_ok() || Self::open_sub_dir(dir, name).is_ok() {
-            return make_error(Error::AlreadyExist);
-        }
-        let dir_info = SaveExtDir {
-            next: 0,
-            sub_dir: 0,
-            sub_file: 0,
-            padding: 0,
-        };
-        Ok(Dir {
-            center: dir.center.clone(),
-            meta: dir.meta.new_sub_dir(name, dir_info)?,
-        })
-    }
-
-    fn new_sub_file(
-        dir: &Self::DirType,
-        name: [u8; 16],
-        len: usize,
-    ) -> Result<Self::FileType, Error> {
-        if Self::open_sub_file(dir, name).is_ok() || Self::open_sub_dir(dir, name).is_ok() {
-            return make_error(Error::AlreadyExist);
-        }
-        if len == 0 {
-            return make_error(Error::InvalidValue);
-        }
-        let unique_id = 0xDEAD_BEEF;
-        let meta = dir.meta.new_sub_file(
-            name,
-            ExtFile {
-                next: 0,
-                padding1: 0,
-                block: 0x8000_0000,
-                unique_id,
-                padding2: 0,
-            },
-        )?;
-        File::from_meta(dir.center.clone(), meta, Some((len, unique_id)))
-    }
-
-    fn dir_delete(dir: Self::DirType) -> Result<(), Error> {
-        dir.meta.delete()
     }
 
     fn commit(center: &Self::CenterType) -> Result<(), Error> {

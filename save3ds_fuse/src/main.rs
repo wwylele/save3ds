@@ -119,7 +119,7 @@ where
         std::fs::create_dir(path)?;
     }
 
-    for (name, ino) in T::list_sub_dir(&dir)? {
+    for (name, ino) in dir.list_sub_dir()? {
         let name = T::NameType::name_3ds_to_str(&name);
         for _ in 0..indent {
             print!(" ");
@@ -129,7 +129,7 @@ where
         extract_impl::<T>(&save, dir, &path.join(name), indent + 1)?;
     }
 
-    for (name, ino) in T::list_sub_file(&dir)? {
+    for (name, ino) in dir.list_sub_file()? {
         let name = T::NameType::name_3ds_to_str(&name);
         for _ in 0..indent {
             print!(" ");
@@ -168,13 +168,13 @@ fn clear_impl<T: file_system::FileSystem>(
 where
     T::NameType: NameConvert + Clone,
 {
-    for (_, ino) in T::list_sub_dir(&dir)? {
+    for (_, ino) in dir.list_sub_dir()? {
         let dir = T::dir_open_ino(save.clone(), ino)?;
         clear_impl::<T>(&save, &dir)?;
-        T::dir_delete(dir)?;
+        dir.delete()?;
     }
 
-    for (_, ino) in T::list_sub_file(&dir)? {
+    for (_, ino) in dir.list_sub_file()? {
         let file = T::file_open_ino(save.clone(), ino)?;
         file.delete()?;
     }
@@ -207,12 +207,12 @@ where
 
         let file_type = entry.file_type()?;
         if file_type.is_dir() {
-            let dir = T::new_sub_dir(&dir, name)?;
+            let dir = dir.new_sub_dir(name)?;
             import_impl::<T>(&save, &dir, &entry.path())?
         } else if file_type.is_file() {
             let mut host_file = std::fs::File::open(&entry.path())?;
             let len = host_file.metadata()?.len() as usize;
-            let file = T::new_sub_file(&dir, name, len)?;
+            let file = dir.new_sub_file(name, len)?;
             let mut buffer = vec![0; len];
             host_file.read_exact(&mut buffer)?;
             file.write(0, &buffer)?;
@@ -437,8 +437,8 @@ where
                     return;
                 };
 
-                if let Ok(child) = T::open_sub_dir(&parent_dir, name_converted.clone()) {
-                    let children_len = if let Ok(chidren) = T::list_sub_dir(&child) {
+                if let Ok(child) = parent_dir.open_sub_dir(name_converted.clone()) {
+                    let children_len = if let Ok(chidren) = child.list_sub_dir() {
                         chidren.len()
                     } else {
                         reply.error(EIO);
@@ -451,14 +451,14 @@ where
                             self.read_only,
                             self.uid,
                             self.gid,
-                            Ino::Dir(T::dir_get_ino(&child)).to_os(),
+                            Ino::Dir(child.get_ino()).to_os(),
                             children_len,
                         ),
                         0,
                     );
                     return;
                 }
-                if let Ok(child) = T::open_sub_file(&parent_dir, name_converted) {
+                if let Ok(child) = parent_dir.open_sub_file(name_converted) {
                     reply.entry(
                         &time::Timespec::new(1, 0),
                         &make_file_attr(
@@ -497,7 +497,7 @@ where
             }
             Ino::Dir(ino) => {
                 if let Ok(dir) = T::dir_open_ino(self.save.clone(), ino) {
-                    let children_len = if let Ok(chidren) = T::list_sub_dir(&dir) {
+                    let children_len = if let Ok(chidren) = dir.list_sub_dir() {
                         chidren.len()
                     } else {
                         reply.error(EIO);
@@ -509,7 +509,7 @@ where
                             self.read_only,
                             self.uid,
                             self.gid,
-                            Ino::Dir(T::dir_get_ino(&dir)).to_os(),
+                            Ino::Dir(dir.get_ino()).to_os(),
                             children_len,
                         ),
                     );
@@ -610,14 +610,14 @@ where
                     reply.error(EIO);
                     return;
                 };
-                match T::new_sub_dir(&parent_dir, name_converted) {
+                match parent_dir.new_sub_dir(name_converted) {
                     Ok(child) => reply.entry(
                         &time::Timespec::new(1, 0),
                         &make_dir_attr(
                             self.read_only,
                             self.uid,
                             self.gid,
-                            Ino::Dir(T::dir_get_ino(&child)).to_os(),
+                            Ino::Dir(child.get_ino()).to_os(),
                             0,
                         ),
                         0,
@@ -663,7 +663,7 @@ where
                     return;
                 };
 
-                match T::new_sub_file(&parent_dir, name_converted, size) {
+                match parent_dir.new_sub_file(name_converted, size) {
                     Ok(child) => reply.entry(
                         &time::Timespec::new(1, 0),
                         &make_file_attr(
@@ -708,8 +708,8 @@ where
                     return;
                 };
 
-                if let Ok(child) = T::open_sub_dir(&parent_dir, name_converted) {
-                    match T::dir_delete(child) {
+                if let Ok(child) = parent_dir.open_sub_dir(name_converted) {
+                    match child.delete() {
                         Ok(()) => reply.ok(),
                         Err(Error::NotEmpty) => reply.error(ENOTEMPTY),
                         Err(_) => reply.error(EIO),
@@ -745,7 +745,7 @@ where
                     return;
                 };
 
-                if let Ok(child) = T::open_sub_file(&parent_dir, name_converted) {
+                if let Ok(child) = parent_dir.open_sub_file(name_converted) {
                     match child.delete() {
                         Ok(()) => reply.ok(),
                         Err(_) => reply.error(EIO),
@@ -877,7 +877,7 @@ where
                 if let Ok(dir) = T::dir_open_ino(self.save.clone(), ino) {
                     let parent_ino = if ino == 1 {
                         1
-                    } else if let Ok(parent_ino) = T::dir_get_parent_ino(&dir) {
+                    } else if let Ok(parent_ino) = dir.get_parent_ino() {
                         parent_ino
                     } else {
                         reply.error(EIO);
@@ -896,7 +896,7 @@ where
                         },
                     ];
 
-                    let sub_dirs = if let Ok(r) = T::list_sub_dir(&dir) {
+                    let sub_dirs = if let Ok(r) = dir.list_sub_dir() {
                         r
                     } else {
                         reply.error(EIO);
@@ -910,7 +910,7 @@ where
                         });
                     }
 
-                    let sub_files = if let Ok(r) = T::list_sub_file(&dir) {
+                    let sub_files = if let Ok(r) = dir.list_sub_file() {
                         r
                     } else {
                         reply.error(EIO);
@@ -1014,8 +1014,8 @@ where
             },
         };
 
-        if let Ok(mut file) = T::open_sub_file(&dir, name_converted.clone()) {
-            if let Ok(old_file) = T::open_sub_file(&newdir, newname_converted.clone()) {
+        if let Ok(mut file) = dir.open_sub_file(name_converted.clone()) {
+            if let Ok(old_file) = newdir.open_sub_file(newname_converted.clone()) {
                 match old_file.delete() {
                     Ok(()) => (),
                     Err(_) => {
@@ -1030,9 +1030,9 @@ where
                 Err(Error::AlreadyExist) => reply.error(EEXIST),
                 Err(_) => reply.error(EIO),
             }
-        } else if let Ok(mut dir) = T::open_sub_dir(&dir, name_converted.clone()) {
-            if let Ok(old_dir) = T::open_sub_dir(&newdir, newname_converted.clone()) {
-                match T::dir_delete(old_dir) {
+        } else if let Ok(mut dir) = dir.open_sub_dir(name_converted.clone()) {
+            if let Ok(old_dir) = newdir.open_sub_dir(newname_converted.clone()) {
+                match old_dir.delete() {
                     Ok(()) => (),
                     Err(Error::NotEmpty) => {
                         reply.error(ENOTEMPTY);
@@ -1045,7 +1045,7 @@ where
                 }
             }
 
-            match T::dir_rename(&mut dir, &newdir, newname_converted) {
+            match dir.rename(&newdir, newname_converted) {
                 Ok(()) => reply.ok(),
                 Err(Error::AlreadyExist) => reply.error(EEXIST),
                 Err(_) => reply.error(EIO),
