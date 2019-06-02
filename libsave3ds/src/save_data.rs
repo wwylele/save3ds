@@ -501,6 +501,94 @@ impl File {
     }
 }
 
+impl FileSystemFile for File {
+    type NameType = [u8; 16];
+    type DirType = Dir;
+
+    fn rename(&mut self, parent: &Self::DirType, name: [u8; 16]) -> Result<(), Error> {
+        self.meta.rename(&parent.meta, name)
+    }
+
+    fn get_parent_ino(&self) -> Result<u32, Error> {
+        self.meta.get_parent_ino()
+    }
+
+    fn get_ino(&self) -> u32 {
+        self.meta.get_ino()
+    }
+
+    fn delete(self) -> Result<(), Error> {
+        if let Some(f) = self.data {
+            f.delete()?;
+        }
+        self.meta.delete()
+    }
+
+    fn resize(&mut self, len: usize) -> Result<(), Error> {
+        if len == self.len {
+            return Ok(());
+        }
+
+        self.meta.check_exclusive()?;
+
+        let mut info = self.meta.get_info()?;
+
+        if self.len == 0 {
+            // zero => non-zero
+            let (fat_file, block) = FatFile::create(
+                self.center.fat.clone(),
+                divide_up(len, self.center.block_len),
+            )?;
+            self.data = Some(fat_file);
+            info.block = block as u32;
+        } else if len == 0 {
+            // non-zero => zero
+            self.data.take().unwrap().delete()?;
+            info.block = 0x8000_0000;
+        } else {
+            self.data
+                .as_mut()
+                .unwrap()
+                .resize(divide_up(len, self.center.block_len))?;
+        }
+
+        info.size = len as u64;
+        self.meta.set_info(info)?;
+
+        self.len = len;
+
+        Ok(())
+    }
+
+    fn read(&self, pos: usize, buf: &mut [u8]) -> Result<(), Error> {
+        if buf.is_empty() {
+            return Ok(());
+        }
+        if pos + buf.len() > self.len {
+            return make_error(Error::OutOfBound);
+        }
+        self.data.as_ref().unwrap().read(pos, buf)
+    }
+
+    fn write(&self, pos: usize, buf: &[u8]) -> Result<(), Error> {
+        if buf.is_empty() {
+            return Ok(());
+        }
+        if pos + buf.len() > self.len {
+            return make_error(Error::OutOfBound);
+        }
+        self.data.as_ref().unwrap().write(pos, buf)
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    fn commit(&self) -> Result<(), Error> {
+        Ok(())
+    }
+}
+
 pub struct Dir {
     center: Rc<SaveData>,
     meta: DirMeta,
@@ -516,89 +604,6 @@ impl FileSystem for SaveDataFileSystem {
     fn file_open_ino(center: Rc<Self::CenterType>, ino: u32) -> Result<Self::FileType, Error> {
         let meta = FileMeta::open_ino(center.fs.clone(), ino)?;
         File::from_meta(center, meta)
-    }
-
-    fn file_rename(
-        file: &mut Self::FileType,
-        parent: &Self::DirType,
-        name: [u8; 16],
-    ) -> Result<(), Error> {
-        file.meta.rename(&parent.meta, name)
-    }
-
-    fn file_get_parent_ino(file: &Self::FileType) -> Result<u32, Error> {
-        file.meta.get_parent_ino()
-    }
-
-    fn file_get_ino(file: &Self::FileType) -> u32 {
-        file.meta.get_ino()
-    }
-
-    fn file_delete(file: Self::FileType) -> Result<(), Error> {
-        if let Some(f) = file.data {
-            f.delete()?;
-        }
-        file.meta.delete()
-    }
-
-    fn resize(file: &mut Self::FileType, len: usize) -> Result<(), Error> {
-        if len == file.len {
-            return Ok(());
-        }
-
-        file.meta.check_exclusive()?;
-
-        let mut info = file.meta.get_info()?;
-
-        if file.len == 0 {
-            // zero => non-zero
-            let (fat_file, block) = FatFile::create(
-                file.center.fat.clone(),
-                divide_up(len, file.center.block_len),
-            )?;
-            file.data = Some(fat_file);
-            info.block = block as u32;
-        } else if len == 0 {
-            // non-zero => zero
-            file.data.take().unwrap().delete()?;
-            info.block = 0x8000_0000;
-        } else {
-            file.data
-                .as_mut()
-                .unwrap()
-                .resize(divide_up(len, file.center.block_len))?;
-        }
-
-        info.size = len as u64;
-        file.meta.set_info(info)?;
-
-        file.len = len;
-
-        Ok(())
-    }
-
-    fn read(file: &Self::FileType, pos: usize, buf: &mut [u8]) -> Result<(), Error> {
-        if buf.is_empty() {
-            return Ok(());
-        }
-        if pos + buf.len() > file.len {
-            return make_error(Error::OutOfBound);
-        }
-        file.data.as_ref().unwrap().read(pos, buf)
-    }
-
-    fn write(file: &Self::FileType, pos: usize, buf: &[u8]) -> Result<(), Error> {
-        if buf.is_empty() {
-            return Ok(());
-        }
-        if pos + buf.len() > file.len {
-            return make_error(Error::OutOfBound);
-        }
-        file.data.as_ref().unwrap().write(pos, buf)
-    }
-
-    fn len(file: &Self::FileType) -> usize {
-        file.len
     }
 
     fn open_root(center: Rc<Self::CenterType>) -> Result<Self::DirType, Error> {

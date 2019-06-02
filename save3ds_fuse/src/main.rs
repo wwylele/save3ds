@@ -2,7 +2,7 @@ use getopts::Options;
 use libsave3ds::db::*;
 use libsave3ds::error::*;
 use libsave3ds::ext_data::*;
-use libsave3ds::file_system;
+use libsave3ds::file_system::{self, *};
 use libsave3ds::save_data::*;
 use libsave3ds::Resource;
 use std::collections::HashMap;
@@ -136,8 +136,8 @@ where
         }
         println!("-{}", &name);
         let file = T::file_open_ino(save.clone(), ino)?;
-        let mut buffer = vec![0; T::len(&file)];
-        match T::read(&file, 0, &mut buffer) {
+        let mut buffer = vec![0; file.len()];
+        match file.read(0, &mut buffer) {
             Ok(()) | Err(Error::HashMismatch) => (),
             e => return e,
         }
@@ -176,7 +176,7 @@ where
 
     for (_, ino) in T::list_sub_file(&dir)? {
         let file = T::file_open_ino(save.clone(), ino)?;
-        T::file_delete(file)?;
+        file.delete()?;
     }
 
     Ok(())
@@ -215,8 +215,8 @@ where
             let file = T::new_sub_file(&dir, name, len)?;
             let mut buffer = vec![0; len];
             host_file.read_exact(&mut buffer)?;
-            T::write(&file, 0, &buffer)?;
-            T::commit_file(&file)?;
+            file.write(0, &buffer)?;
+            file.commit()?;
         } else {
             println!("Unrecognized file type: {:?}", entry.path());
         }
@@ -465,8 +465,8 @@ where
                             self.read_only,
                             self.uid,
                             self.gid,
-                            Ino::File(T::file_get_ino(&child)).to_os(),
-                            T::len(&child),
+                            Ino::File(child.get_ino()).to_os(),
+                            child.len(),
                         ),
                         0,
                     );
@@ -487,8 +487,8 @@ where
                             self.read_only,
                             self.uid,
                             self.gid,
-                            Ino::File(T::file_get_ino(&file)).to_os(),
-                            T::len(&file),
+                            Ino::File(file.get_ino()).to_os(),
+                            file.len(),
                         ),
                     );
                 } else {
@@ -550,7 +550,7 @@ where
                 } else if let Some(file) = self
                     .file_fh_map
                     .iter_mut()
-                    .filter(|(_, b)| T::file_get_ino(b) == ino)
+                    .filter(|(_, b)| b.get_ino() == ino)
                     .map(|(_, b)| b)
                     .next()
                 {
@@ -567,7 +567,7 @@ where
                 };
 
                 if let Some(size) = size {
-                    if T::resize(file, size as usize).is_err() {
+                    if file.resize(size as usize).is_err() {
                         reply.error(EIO);
                         return;
                     }
@@ -579,8 +579,8 @@ where
                         self.read_only,
                         self.uid,
                         self.gid,
-                        Ino::File(T::file_get_ino(&file)).to_os(),
-                        T::len(&file),
+                        Ino::File(file.get_ino()).to_os(),
+                        file.len(),
                     ),
                 );
             }
@@ -670,7 +670,7 @@ where
                             self.read_only,
                             self.uid,
                             self.gid,
-                            Ino::File(T::file_get_ino(&child)).to_os(),
+                            Ino::File(child.get_ino()).to_os(),
                             0,
                         ),
                         0,
@@ -746,7 +746,7 @@ where
                 };
 
                 if let Ok(child) = T::open_sub_file(&parent_dir, name_converted) {
-                    match T::file_delete(child) {
+                    match child.delete() {
                         Ok(()) => reply.ok(),
                         Err(_) => reply.error(EIO),
                     }
@@ -786,7 +786,7 @@ where
     ) {
         if let Some(file) = self.file_fh_map.remove(&fh) {
             if !self.read_only {
-                if let Err(e) = T::commit_file(&file) {
+                if let Err(e) = file.commit() {
                     println!("Failed to save file: {}", e);
                 }
             }
@@ -810,13 +810,13 @@ where
                 reply.data(&[]);
                 return;
             }
-            let end = std::cmp::min(offset + size, T::len(&file));
+            let end = std::cmp::min(offset + size, file.len());
             if end <= offset {
                 reply.data(&[]);
                 return;
             }
             let mut buf = vec![0; end - offset];
-            match T::read(&file, offset, &mut buf) {
+            match file.read(offset, &mut buf) {
                 Ok(()) | Err(Error::HashMismatch) => reply.data(&buf),
                 _ => reply.error(EIO),
             }
@@ -842,13 +842,13 @@ where
 
         let offset = offset as usize;
         let end = offset + data.len();
-        if let Some(mut file) = self.file_fh_map.get_mut(&fh) {
+        if let Some(file) = self.file_fh_map.get_mut(&fh) {
             if data.is_empty() {
                 reply.written(0);
                 return;
             }
-            if end > T::len(&file) {
-                match T::resize(&mut file, end) {
+            if end > file.len() {
+                match file.resize(end) {
                     Ok(()) => (),
                     Err(Error::NoSpace) => {
                         reply.error(ENOSPC);
@@ -861,7 +861,7 @@ where
                 }
             }
 
-            match T::write(&file, offset, &data) {
+            match file.write(offset, &data) {
                 Ok(()) => reply.written(data.len() as u32),
                 _ => reply.error(EIO),
             }
@@ -1016,7 +1016,7 @@ where
 
         if let Ok(mut file) = T::open_sub_file(&dir, name_converted.clone()) {
             if let Ok(old_file) = T::open_sub_file(&newdir, newname_converted.clone()) {
-                match T::file_delete(old_file) {
+                match old_file.delete() {
                     Ok(()) => (),
                     Err(_) => {
                         reply.error(EIO);
@@ -1025,7 +1025,7 @@ where
                 }
             }
 
-            match T::file_rename(&mut file, &newdir, newname_converted.clone()) {
+            match file.rename(&newdir, newname_converted.clone()) {
                 Ok(()) => reply.ok(),
                 Err(Error::AlreadyExist) => reply.error(EEXIST),
                 Err(_) => reply.error(EIO),

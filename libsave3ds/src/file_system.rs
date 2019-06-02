@@ -1,49 +1,33 @@
 use crate::error::*;
 use std::rc::Rc;
 
+pub trait FileSystemFile {
+    type NameType;
+    type DirType;
+
+    fn rename(&mut self, parent: &Self::DirType, name: Self::NameType) -> Result<(), Error>;
+    fn get_parent_ino(&self) -> Result<u32, Error>;
+    fn get_ino(&self) -> u32;
+    fn delete(self) -> Result<(), Error>;
+    fn resize(&mut self, len: usize) -> Result<(), Error>;
+    fn read(&self, pos: usize, buf: &mut [u8]) -> Result<(), Error>;
+    fn write(&self, pos: usize, buf: &[u8]) -> Result<(), Error>;
+    fn len(&self) -> usize;
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+    fn commit(&self) -> Result<(), Error>;
+}
+
 #[allow(unused_variables)]
 pub trait FileSystem {
     type CenterType;
-    type FileType;
+    type FileType: FileSystemFile<NameType = Self::NameType, DirType = Self::DirType>;
     type DirType;
     type NameType;
 
     fn file_open_ino(center: Rc<Self::CenterType>, ino: u32) -> Result<Self::FileType, Error> {
         make_error(Error::Unsupported)
-    }
-
-    fn file_rename(
-        file: &mut Self::FileType,
-        parent: &Self::DirType,
-        name: Self::NameType,
-    ) -> Result<(), Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn file_get_parent_ino(file: &Self::FileType) -> Result<u32, Error>;
-
-    fn file_get_ino(file: &Self::FileType) -> u32;
-
-    fn file_delete(file: Self::FileType) -> Result<(), Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn resize(file: &mut Self::FileType, len: usize) -> Result<(), Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn read(file: &Self::FileType, pos: usize, buf: &mut [u8]) -> Result<(), Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn write(file: &Self::FileType, pos: usize, buf: &[u8]) -> Result<(), Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn len(file: &Self::FileType) -> usize;
-
-    fn is_empty(file: &Self::FileType) -> bool {
-        Self::len(file) == 0
     }
 
     fn open_root(center: Rc<Self::CenterType>) -> Result<Self::DirType, Error> {
@@ -99,10 +83,6 @@ pub trait FileSystem {
     }
 
     fn commit(center: &Self::CenterType) -> Result<(), Error> {
-        Ok(())
-    }
-
-    fn commit_file(file: &Self::FileType) -> Result<(), Error> {
         Ok(())
     }
 }

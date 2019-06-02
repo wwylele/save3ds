@@ -523,6 +523,89 @@ impl File {
     }
 }
 
+impl FileSystemFile for File {
+    type NameType = [u8; 16];
+    type DirType = Dir;
+
+    fn rename(&mut self, parent: &Self::DirType, name: [u8; 16]) -> Result<(), Error> {
+        self.meta.rename(&parent.meta, name)
+    }
+
+    fn get_parent_ino(&self) -> Result<u32, Error> {
+        self.meta.get_parent_ino()
+    }
+
+    fn get_ino(&self) -> u32 {
+        self.meta.get_ino()
+    }
+
+    fn resize(&mut self, _len: usize) -> Result<(), Error> {
+        make_error(Error::Unsupported)
+    }
+
+    fn delete(self) -> Result<(), Error> {
+        let file_index = self.meta.get_ino() + 1;
+        let physical_len = self.data.parent_len();
+        let id_high = format!("{:08x}", self.center.id >> 32);
+        let id_low = format!("{:08x}", self.center.id & 0xFFFF_FFFF);
+        let fid_high = file_index / 126;
+        let fid_low = file_index % 126;
+        let fid_high_s = format!("{:08x}", fid_high);
+        let fid_low_s = format!("{:08x}", fid_low);
+        let path: Vec<&str> = self
+            .center
+            .base_path
+            .iter()
+            .map(|s| s as &str)
+            .chain(
+                [&id_high, &id_low, &fid_high_s, &fid_low_s]
+                    .iter()
+                    .map(|s| s as &str),
+            )
+            .collect();
+
+        self.center.sd_nand.remove(&path)?;
+        self.meta.delete()?;
+
+        if let Some(quota_file) = self.center.quota_file.as_ref() {
+            let mut quota: Quota = read_struct(quota_file.partition().as_ref(), 0)?;
+            quota.mount_id = file_index as u32;
+            quota.mount_len = physical_len as u64;
+            let block = (divide_up(physical_len, 0x1000)) as u32;
+            quota.free_block += block;
+            quota.potential_free_block = quota.free_block;
+            write_struct(quota_file.partition().as_ref(), 0, quota)?;
+            quota_file.commit()?;
+        }
+
+        Ok(())
+    }
+
+    fn read(&self, pos: usize, buf: &mut [u8]) -> Result<(), Error> {
+        if buf.is_empty() {
+            return Ok(());
+        }
+        self.data.partition().read(pos, buf)
+    }
+
+    fn write(&self, pos: usize, buf: &[u8]) -> Result<(), Error> {
+        if buf.is_empty() {
+            return Ok(());
+        }
+        self.meta.check_exclusive()?;
+        self.data.partition().write(pos, buf)
+    }
+
+    fn len(&self) -> usize {
+        self.data.partition().len()
+    }
+
+    fn commit(&self) -> Result<(), Error> {
+        self.meta.check_exclusive()?;
+        self.data.commit()
+    }
+}
+
 pub struct Dir {
     center: Rc<ExtData>,
     meta: DirMeta,
@@ -538,79 +621,6 @@ impl FileSystem for ExtDataFileSystem {
     fn file_open_ino(center: Rc<Self::CenterType>, ino: u32) -> Result<Self::FileType, Error> {
         let meta = FileMeta::open_ino(center.fs.clone(), ino)?;
         File::from_meta(center, meta, None)
-    }
-
-    fn file_rename(
-        file: &mut Self::FileType,
-        parent: &Self::DirType,
-        name: [u8; 16],
-    ) -> Result<(), Error> {
-        file.meta.rename(&parent.meta, name)
-    }
-
-    fn file_get_parent_ino(file: &Self::FileType) -> Result<u32, Error> {
-        file.meta.get_parent_ino()
-    }
-
-    fn file_get_ino(file: &Self::FileType) -> u32 {
-        file.meta.get_ino()
-    }
-
-    fn file_delete(file: Self::FileType) -> Result<(), Error> {
-        let file_index = file.meta.get_ino() + 1;
-        let physical_len = file.data.parent_len();
-        let id_high = format!("{:08x}", file.center.id >> 32);
-        let id_low = format!("{:08x}", file.center.id & 0xFFFF_FFFF);
-        let fid_high = file_index / 126;
-        let fid_low = file_index % 126;
-        let fid_high_s = format!("{:08x}", fid_high);
-        let fid_low_s = format!("{:08x}", fid_low);
-        let path: Vec<&str> = file
-            .center
-            .base_path
-            .iter()
-            .map(|s| s as &str)
-            .chain(
-                [&id_high, &id_low, &fid_high_s, &fid_low_s]
-                    .iter()
-                    .map(|s| s as &str),
-            )
-            .collect();
-
-        file.center.sd_nand.remove(&path)?;
-        file.meta.delete()?;
-
-        if let Some(quota_file) = file.center.quota_file.as_ref() {
-            let mut quota: Quota = read_struct(quota_file.partition().as_ref(), 0)?;
-            quota.mount_id = file_index as u32;
-            quota.mount_len = physical_len as u64;
-            let block = (divide_up(physical_len, 0x1000)) as u32;
-            quota.free_block += block;
-            quota.potential_free_block = quota.free_block;
-            write_struct(quota_file.partition().as_ref(), 0, quota)?;
-            quota_file.commit()?;
-        }
-
-        Ok(())
-    }
-
-    fn read(file: &Self::FileType, pos: usize, buf: &mut [u8]) -> Result<(), Error> {
-        if buf.is_empty() {
-            return Ok(());
-        }
-        file.data.partition().read(pos, buf)
-    }
-
-    fn write(file: &Self::FileType, pos: usize, buf: &[u8]) -> Result<(), Error> {
-        if buf.is_empty() {
-            return Ok(());
-        }
-        file.meta.check_exclusive()?;
-        file.data.partition().write(pos, buf)
-    }
-
-    fn len(file: &Self::FileType) -> usize {
-        file.data.partition().len()
     }
 
     fn open_root(center: Rc<Self::CenterType>) -> Result<Self::DirType, Error> {
@@ -708,11 +718,6 @@ impl FileSystem for ExtDataFileSystem {
 
     fn commit(center: &Self::CenterType) -> Result<(), Error> {
         center.meta_file.commit()
-    }
-
-    fn commit_file(file: &Self::FileType) -> Result<(), Error> {
-        file.meta.check_exclusive()?;
-        file.data.commit()
     }
 }
 
