@@ -40,7 +40,6 @@ pub trait FileSystemDir {
     fn delete(self) -> Result<(), Error>;
 }
 
-#[allow(unused_variables)]
 pub trait FileSystem {
     type FileType: FileSystemFile<NameType = Self::NameType, DirType = Self::DirType>;
     type DirType: FileSystemDir<NameType = Self::NameType, FileType = Self::FileType>;
