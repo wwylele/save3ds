@@ -46,7 +46,7 @@ pub trait FileSystem {
     fn open_file(&self, ino: u32) -> Result<Self::FileType, Error>;
     fn open_dir(&self, ino: u32) -> Result<Self::DirType, Error>;
     fn open_root(&self) -> Result<Self::DirType, Error> {
-        self.open_dir(0)
+        self.open_dir(1)
     }
     fn commit(&self) -> Result<(), Error>;
 }
