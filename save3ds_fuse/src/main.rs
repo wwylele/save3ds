@@ -343,7 +343,7 @@ fn make_file_attr(read_only: bool, uid: u32, gid: u32, ino: u64, file_size: usiz
     }
 }
 
-#[cfg(all(unix, feature = "unixfuse"))]
+#[allow(unused)]
 fn name_os_to_3ds<T: NameConvert>(name: &OsStr) -> Option<(T, &str)> {
     let s = name.to_str()?;
     let argument_pos = s.find("\\+");
