@@ -305,6 +305,7 @@ pub mod test {
                                 Err(Error::NoSpace) => {
                                     // assert_eq!(file_mirrors.len(), param.max_file as usize);
                                 }
+                                Err(Error::Unsupported) => {}
                                 Ok(child) => {
                                     assert!(dir_mirrors.iter().all(|d| d.path != child_path));
                                     assert!(file_mirrors.iter().all(|d| d.path != child_path));
@@ -432,6 +433,7 @@ pub mod test {
                                 Err(Error::NoSpace) => {
                                     //..
                                 }
+                                Err(Error::Unsupported) => {}
                                 Ok(()) => {
                                     if len < old_len {
                                         file_mirrors[file_index].data.truncate(len);

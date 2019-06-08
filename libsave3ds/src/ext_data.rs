@@ -675,7 +675,7 @@ impl FileSystemDir for Dir {
             return make_error(Error::AlreadyExist);
         }
         if len == 0 {
-            return make_error(Error::InvalidValue);
+            return make_error(Error::Unsupported);
         }
         let unique_id = 0xDEAD_BEEF;
         let meta = self.meta.new_sub_file(
@@ -729,4 +729,52 @@ mod test {
         assert_eq!(Quota::BYTE_LEN, 0x48);
     }
 
+    fn gen_name() -> [u8; 16] {
+        use rand::prelude::*;
+        let mut rng = rand::thread_rng();
+        let mut name = [0; 16];
+        name[0] = rng.gen_range(0, 5);
+        name
+    }
+
+    fn gen_len() -> usize {
+        use rand::prelude::*;
+        let mut rng = rand::thread_rng();
+        if rng.gen_range(0, 5) == 0 {
+            0
+        } else {
+            rng.gen_range(0, 4096 * 5)
+        }
+    }
+
+    #[test]
+    fn fs_fuzz() {
+        use crate::nand::*;
+        use rand::prelude::*;
+        use tempfile::*;
+        let mut rng = rand::thread_rng();
+
+        for _ in 0..10 {
+            let nand_dir = tempdir().unwrap();
+            let nand = Rc::new(Nand::new(nand_dir.path().to_str().unwrap()).unwrap());
+
+            let param = ExtDataFormatParam {
+                max_dir: rng.gen_range(10, 100),
+                dir_buckets: rng.gen_range(10, 100),
+                max_file: rng.gen_range(10, 100),
+                file_buckets: rng.gen_range(10, 100),
+            };
+
+            ExtData::format(nand.as_ref(), &[], 0, [0; 16], None, &param).unwrap();
+            let file_system = ExtData::new(nand.clone(), &[], 0, [0; 16], false, true).unwrap();
+            crate::file_system::test::fuzzer(
+                file_system,
+                param.max_dir as usize,
+                param.max_file as usize,
+                || ExtData::new(nand.clone(), &[], 0, [0; 16], false, true).unwrap(),
+                gen_name,
+                gen_len,
+            );
+        }
+    }
 }

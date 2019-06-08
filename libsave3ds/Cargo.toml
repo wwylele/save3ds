@@ -13,3 +13,4 @@ lru = "0.1.15"
 
 [dev-dependencies]
 rand = "0.6.5"
+tempfile = "3.0.8"
