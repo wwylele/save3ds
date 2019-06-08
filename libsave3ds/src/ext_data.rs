@@ -568,6 +568,7 @@ impl FileSystemFile for File {
             )
             .collect();
 
+        std::mem::drop(self.data); // close the file first
         self.center.sd_nand.remove(&path)?;
         self.meta.delete()?;
 
