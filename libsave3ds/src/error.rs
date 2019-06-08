@@ -24,8 +24,37 @@ pub enum Error {
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        // TODO: better UI
-        (self as &fmt::Debug).fmt(f)
+        match self {
+            Error::IO(e) => write!(f, "IO error from host file system: {:?}", e),
+            Error::HashMismatch => write!(
+                f,
+                "SHA256 mismatch, caused by either corrupted data or uninitialized data"
+            ),
+            Error::OutOfBound => write!(f, "Out-of-bound access, caused by corrupted data"),
+            Error::MagicMismatch => write!(f, "Magic mismatch, caused by corrupted data"),
+            Error::SizeMismatch => write!(f, "Size mismatch, caused by corrupted data"),
+            Error::InvalidValue => write!(f, "Invalid value, caused by corrupted data"),
+            Error::BrokenFat => write!(f, "Broken FAT,  caused by corrupted data"),
+            Error::NoSpace => write!(f, "Insufficient space for the operation"),
+            Error::NotFound => write!(f, "The requested file or directory is not found"),
+            Error::AlreadyExist => write!(f, "The file or directory to create already exists"),
+            Error::DeletingRoot => write!(f, "Trying to delete the root directory"),
+            Error::SignatureMismatch => write!(f, "Signature mismatch, caused by corrupted data"),
+            Error::Missing => write!(
+                f,
+                "Provided resource (SD, NAND, OTP etc.) is insufficient for opening the archive"
+            ),
+            Error::NotEmpty => write!(f, "Trying to delete a non-empty directory"),
+            Error::Unsupported => write!(f, "The operation is not supported on this archive"),
+            Error::UniqueIdMismatch => {
+                write!(f, "Extdata unique ID mismatch, caused by corrupted data")
+            }
+            Error::BrokenOtp => write!(f, "Corrupted OTP"),
+            Error::Busy => write!(
+                f,
+                "The file or directory is currently used by other program"
+            ),
+        }
     }
 }
 
