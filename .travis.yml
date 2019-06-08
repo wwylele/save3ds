@@ -1,0 +1,17 @@
+
+language: rust
+dist: xenial
+cache: cargo
+os:
+  - linux
+  - osx
+  - windows
+rust:
+  - stable
+script:
+  - cargo build -v
+  - cargo test -v
+
+env:
+  global:
+    - RUST_BACKTRACE=1
