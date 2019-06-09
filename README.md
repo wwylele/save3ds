@@ -7,10 +7,7 @@ Extract, import and FUSE program for common save format for 3DS, written in rust
 This project, along with documentation, is still WIP. There are two main components in the project: the library `libsave3ds`, and the FUSE program + extract/import tool `save3ds_fuse` that builds on top of it. The FUSE feature is not available on Windows.
 
 Both the library and the program currently supports the following operations:
- - Full filesystem operation on save data stored on NAND, on SD or standalone
- - Most filesystem operation on extdata stored on NAND or on SD
-   - Resizing file is not supported due to format limitation.
-   - Creating file needs a non-zero size specified.
+ - Full filesystem operation on save data and extdata stored on NAND, on SD or standalone
  - Editing title database and tickets
 
 Note that the supported NAND format is in unpacked cleartext filesystem. If you want to read/write on the original NAND FAT image, you need to use other tools to extract the NAND data, or map another layer of virtual filesystem (e.g. https://github.com/ihaveamac/ninfs)
@@ -117,7 +114,9 @@ Files in title database archives are named with title ID in 16-digit hex. File n
 
 ### Extdata file size
 
-Due to the format design, a file in Extdata cannot change its size once created, unless deleted and created again. This makes many normal filesystem operations awkward. For starters, a non-zero size is needed for creating a new file. This is done by specifying a special sequence `\+size` in the file name. For example, `a.bin\+123` creates the file `a.bin` with size of 123 bytes. This, however, doesn't comply with the expected filesystem behaviour, and breaks file name cache in browsers etc. Files can't be truncated, and don't automatically grow when being written beyond the end either. These breaks most file modification from file editor or bash command, because they usually truncate and then append the file. One can only modify a file by writing to the middle of it (e.g open in `"r+"` mode in C).
+Due to the format design, extdata does not support resizing files natively on 3DS, nor creating files with zero size. This program works around the issue by deleting and recreating files on resizing, which is stupidly slow if the user appends a file on every write operation. Zero-size files created by this program can't be opened on 3DS either, so one needs to make sure there is no such file before importing the data back to 3DS.
+
+One can create a file with a specific size, similar to the `CreateFile` operation on 3DS. This is done by specifying a special sequence `\+size` in the file name. For example, `a.bin\+123` creates the file `a.bin` with size of 123 bytes. This, however, doesn't comply with the expected filesystem behaviour, and breaks file name cache in browsers etc.
 
 Because of all the mess, it is recommended to use `--import` mode instead of mount mode if you intend to modify the content of an extdata.
 

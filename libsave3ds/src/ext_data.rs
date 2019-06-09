@@ -528,6 +528,46 @@ impl File {
         }
         Ok(File { center, meta, data })
     }
+
+    fn delete_data(&mut self) -> Result<(), Error> {
+        let file_index = self.meta.get_ino() + 1;
+        let physical_len = self.data.as_ref().map_or(0, Diff::parent_len);
+
+        if let Some(file) = self.data.take() {
+            std::mem::drop(file); // close the file first
+            let id_high = format!("{:08x}", self.center.id >> 32);
+            let id_low = format!("{:08x}", self.center.id & 0xFFFF_FFFF);
+            let fid_high = file_index / 126;
+            let fid_low = file_index % 126;
+            let fid_high_s = format!("{:08x}", fid_high);
+            let fid_low_s = format!("{:08x}", fid_low);
+            let path: Vec<&str> = self
+                .center
+                .base_path
+                .iter()
+                .map(|s| s as &str)
+                .chain(
+                    [&id_high, &id_low, &fid_high_s, &fid_low_s]
+                        .iter()
+                        .map(|s| s as &str),
+                )
+                .collect();
+            self.center.sd_nand.remove(&path)?;
+        }
+
+        if let Some(quota_file) = self.center.quota_file.as_ref() {
+            let mut quota: Quota = read_struct(quota_file.partition().as_ref(), 0)?;
+            quota.mount_id = file_index as u32;
+            quota.mount_len = physical_len as u64;
+            let block = (divide_up(physical_len, 0x1000)) as u32;
+            quota.free_block += block;
+            quota.potential_free_block = quota.free_block;
+            write_struct(quota_file.partition().as_ref(), 0, quota)?;
+            quota_file.commit()?;
+        }
+
+        Ok(())
+    }
 }
 
 impl FileSystemFile for File {
@@ -549,46 +589,32 @@ impl FileSystemFile for File {
         self.meta.get_ino()
     }
 
-    fn resize(&mut self, _len: usize) -> Result<(), Error> {
-        make_error(Error::Unsupported)
-    }
-
-    fn delete(self) -> Result<(), Error> {
-        let file_index = self.meta.get_ino() + 1;
-        let physical_len = self.data.as_ref().map_or(0, Diff::parent_len);
-        let id_high = format!("{:08x}", self.center.id >> 32);
-        let id_low = format!("{:08x}", self.center.id & 0xFFFF_FFFF);
-        let fid_high = file_index / 126;
-        let fid_low = file_index % 126;
-        let fid_high_s = format!("{:08x}", fid_high);
-        let fid_low_s = format!("{:08x}", fid_low);
-        let path: Vec<&str> = self
-            .center
-            .base_path
-            .iter()
-            .map(|s| s as &str)
-            .chain(
-                [&id_high, &id_low, &fid_high_s, &fid_low_s]
-                    .iter()
-                    .map(|s| s as &str),
-            )
-            .collect();
-
-        std::mem::drop(self.data); // close the file first
-        self.center.sd_nand.remove(&path)?;
-        self.meta.delete()?;
-
-        if let Some(quota_file) = self.center.quota_file.as_ref() {
-            let mut quota: Quota = read_struct(quota_file.partition().as_ref(), 0)?;
-            quota.mount_id = file_index as u32;
-            quota.mount_len = physical_len as u64;
-            let block = (divide_up(physical_len, 0x1000)) as u32;
-            quota.free_block += block;
-            quota.potential_free_block = quota.free_block;
-            write_struct(quota_file.partition().as_ref(), 0, quota)?;
-            quota_file.commit()?;
+    fn resize(&mut self, len: usize) -> Result<(), Error> {
+        if len == self.len() {
+            return Ok(());
         }
 
+        self.meta.check_exclusive()?;
+
+        let mut buf = vec![0; len];
+        match self.read(0, &mut buf[0..std::cmp::min(len, self.len())]) {
+            Ok(()) | Err(Error::HashMismatch) => {}
+            e => return e,
+        }
+
+        self.delete_data()?;
+
+        let unique_id = self.meta.get_info()?.unique_id;
+        let meta = FileMeta::open_ino(self.center.fs.clone(), self.meta.get_ino())?;
+        *self = File::from_meta(self.center.clone(), meta, Some((len, unique_id)))?;
+        self.write(0, &buf)?;
+        self.commit()?;
+        Ok(())
+    }
+
+    fn delete(mut self) -> Result<(), Error> {
+        self.delete_data()?;
+        self.meta.delete()?;
         Ok(())
     }
 
