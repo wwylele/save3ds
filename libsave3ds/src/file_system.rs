@@ -38,6 +38,16 @@ pub trait FileSystemDir {
     fn delete(self) -> Result<(), Error>;
 }
 
+pub struct Stat {
+    pub block_len: usize,
+    pub total_blocks: usize,
+    pub free_blocks: usize,
+    pub total_files: usize,
+    pub free_files: usize,
+    pub total_dirs: usize,
+    pub free_dirs: usize,
+}
+
 pub trait FileSystem {
     type FileType: FileSystemFile<NameType = Self::NameType, DirType = Self::DirType>;
     type DirType: FileSystemDir<NameType = Self::NameType, FileType = Self::FileType>;
@@ -49,6 +59,7 @@ pub trait FileSystem {
         self.open_dir(1)
     }
     fn commit(&self) -> Result<(), Error>;
+    fn stat(&self) -> Result<Stat, Error>;
 }
 
 #[cfg(test)]

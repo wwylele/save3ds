@@ -87,6 +87,11 @@ impl<KeyType, InfoType> RefTicket<KeyType, InfoType> {
     }
 }
 
+pub struct MetaTableStat {
+    pub total: usize,
+    pub free: usize,
+}
+
 struct MetaTable<KeyType, InfoType> {
     hash: Rc<RandomAccessFile>,
     table: Rc<RandomAccessFile>,
@@ -267,6 +272,24 @@ impl<KeyType: ByteStruct + PartialEq, InfoType: ByteStruct> MetaTable<KeyType, I
         Ok(index)
     }
 
+    fn stat(&self) -> Result<MetaTableStat, Error> {
+        let table = self.table.as_ref();
+        let entry_count = read_struct::<U32le>(table, 0)?.v;
+        let max_entry_count = read_struct::<U32le>(table, 4)?.v;
+        let mut index = read_struct::<U32le>(table, self.eo_collision)?.v;
+        let mut dummy_count = 0;
+        while index != 0 {
+            dummy_count += 1;
+            let entry_offset = index as usize * self.entry_len;
+            index = read_struct::<U32le>(table, entry_offset + self.eo_collision)?.v;
+        }
+
+        Ok(MetaTableStat {
+            total: max_entry_count as usize - 1,
+            free: (max_entry_count - entry_count + dummy_count) as usize,
+        })
+    }
+
     pub fn acquire_ticket(&self, index: u32) -> RefTicket<KeyType, InfoType> {
         let mut ref_count = self.ref_count.borrow_mut();
         let previous = ref_count.get(&index).cloned().unwrap_or(0);
@@ -303,6 +326,11 @@ pub trait DirInfo: ByteStruct + Clone {
     fn set_next(&mut self, index: u32);
     fn get_next(&self) -> u32;
     fn new_root() -> Self;
+}
+
+pub struct MetaStat {
+    pub dirs: MetaTableStat,
+    pub files: MetaTableStat,
 }
 
 pub struct FsMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType> {
@@ -350,6 +378,13 @@ impl<
             dirs: MetaTable::new(dir_hash, dir_table)?,
             files: MetaTable::new(file_hash, file_table)?,
         }))
+    }
+
+    pub fn stat(&self) -> Result<MetaStat, Error> {
+        Ok(MetaStat {
+            dirs: self.dirs.stat()?,
+            files: self.files.stat()?,
+        })
     }
 }
 

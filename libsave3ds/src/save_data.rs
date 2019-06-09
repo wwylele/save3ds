@@ -88,6 +88,7 @@ struct SaveDataInner {
     fat: Rc<Fat>,
     fs: Rc<FsMeta>,
     block_len: usize,
+    block_count: usize,
 }
 
 pub struct SaveData {
@@ -470,6 +471,7 @@ impl SaveData {
                 fat,
                 fs,
                 block_len: fs_info.block_len as usize,
+                block_count: fs_info.data_block_count as usize,
             }),
         })
     }
@@ -715,6 +717,19 @@ impl FileSystem for SaveData {
 
     fn commit(&self) -> Result<(), Error> {
         self.center.disa.commit()
+    }
+
+    fn stat(&self) -> Result<Stat, Error> {
+        let meta_stat = self.center.fs.stat()?;
+        Ok(Stat {
+            block_len: self.center.block_len,
+            total_blocks: self.center.block_count,
+            free_blocks: self.center.fat.free_blocks(),
+            total_files: meta_stat.files.total,
+            free_files: meta_stat.files.free,
+            total_dirs: meta_stat.dirs.total,
+            free_dirs: meta_stat.dirs.free,
+        })
     }
 }
 

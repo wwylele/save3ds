@@ -755,6 +755,19 @@ impl FileSystem for ExtData {
     fn commit(&self) -> Result<(), Error> {
         self.center.meta_file.commit()
     }
+
+    fn stat(&self) -> Result<Stat, Error> {
+        let meta_stat = self.center.fs.stat()?;
+        Ok(Stat {
+            block_len: 0,
+            total_blocks: 0,
+            free_blocks: 0,
+            total_files: meta_stat.files.total,
+            free_files: meta_stat.files.free,
+            total_dirs: meta_stat.dirs.total,
+            free_dirs: meta_stat.dirs.free,
+        })
+    }
 }
 
 #[cfg(test)]

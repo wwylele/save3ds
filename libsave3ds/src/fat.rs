@@ -318,6 +318,10 @@ impl Fat {
             free_blocks: Cell::new(free_blocks),
         }))
     }
+
+    pub fn free_blocks(&self) -> usize {
+        self.free_blocks.get()
+    }
 }
 
 pub struct FatFile {

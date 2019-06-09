@@ -1040,6 +1040,22 @@ where
             reply.error(ENOENT);
         }
     }
+
+    fn statfs(&mut self, _req: &Request, _ino: u64, reply: ReplyStatfs) {
+        match self.save.stat() {
+            Err(_) => reply.error(EIO),
+            Ok(stat) => reply.statfs(
+                stat.total_blocks as u64,
+                stat.free_blocks as u64,
+                stat.free_blocks as u64,
+                stat.total_files as u64,
+                stat.free_files as u64,
+                stat.block_len as u32,
+                16,
+                0,
+            ),
+        }
+    }
 }
 
 fn print_usage(program: &str, opts: Options) {
