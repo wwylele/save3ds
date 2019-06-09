@@ -441,7 +441,7 @@ impl ExtData {
 pub struct File {
     center: Rc<ExtDataInner>,
     meta: FileMeta,
-    data: Diff,
+    data: Option<Diff>,
 }
 
 impl File {
@@ -470,54 +470,60 @@ impl File {
 
         let mut param = None;
         if let Some((len, _)) = new {
-            param = Some(DifiPartitionParam {
-                dpfs_level2_block_len: 128,
-                dpfs_level3_block_len: 4096,
-                ivfc_level1_block_len: 512,
-                ivfc_level2_block_len: 512,
-                ivfc_level3_block_len: 4096,
-                ivfc_level4_block_len: 4096,
-                data_len: len,
-                external_ivfc_level4: true,
-            });
+            if len != 0 {
+                param = Some(DifiPartitionParam {
+                    dpfs_level2_block_len: 128,
+                    dpfs_level3_block_len: 4096,
+                    ivfc_level1_block_len: 512,
+                    ivfc_level2_block_len: 512,
+                    ivfc_level3_block_len: 4096,
+                    ivfc_level4_block_len: 4096,
+                    data_len: len,
+                    external_ivfc_level4: true,
+                });
 
-            let physical_len = Diff::calculate_size(param.as_ref().unwrap());
+                let physical_len = Diff::calculate_size(param.as_ref().unwrap());
 
-            if let Some(quota_file) = center.quota_file.as_ref() {
-                let mut quota: Quota = read_struct(quota_file.partition().as_ref(), 0)?;
-                let block = (divide_up(physical_len, 0x1000)) as u32;
-                if quota.free_block < block {
-                    return make_error(Error::NoSpace);
+                if let Some(quota_file) = center.quota_file.as_ref() {
+                    let mut quota: Quota = read_struct(quota_file.partition().as_ref(), 0)?;
+                    let block = (divide_up(physical_len, 0x1000)) as u32;
+                    if quota.free_block < block {
+                        return make_error(Error::NoSpace);
+                    }
+                    quota.mount_id = file_index as u32;
+                    quota.mount_len = physical_len as u64;
+                    quota.potential_free_block = quota.free_block;
+                    quota.free_block -= block;
+                    write_struct(quota_file.partition().as_ref(), 0, quota)?;
+                    quota_file.commit()?;
                 }
-                quota.mount_id = file_index as u32;
-                quota.mount_len = physical_len as u64;
-                quota.potential_free_block = quota.free_block;
-                quota.free_block -= block;
-                write_struct(quota_file.partition().as_ref(), 0, quota)?;
-                quota_file.commit()?;
-            }
 
-            center.sd_nand.create(&path, physical_len)?
+                center.sd_nand.create(&path, physical_len)?
+            }
         }
-        let file = center.sd_nand.open(&path, center.write)?;
+        let file = center.sd_nand.open(&path, center.write).ok();
         let signer = Box::new(ExtSigner {
             id: center.id,
             sub_id: Some((u64::from(fid_high) << 32) | u64::from(fid_low)),
         });
 
         if let Some((_, unique_id)) = new {
-            Diff::format(
-                file.clone(),
-                Some((signer.clone(), center.key)),
-                param.as_ref().unwrap(),
-                unique_id,
-            )?;
+            if let Some(file) = file.as_ref() {
+                Diff::format(
+                    file.clone(),
+                    Some((signer.clone(), center.key)),
+                    param.as_ref().unwrap(),
+                    unique_id,
+                )?;
+            }
         }
 
-        let data = Diff::new(file, Some((signer, center.key)))?;
+        let data = file
+            .map(|file| Diff::new(file, Some((signer, center.key))))
+            .transpose()?;
 
         let info = meta.get_info()?;
-        if info.unique_id != data.unique_id() {
+        if data.is_some() && info.unique_id != data.as_ref().unwrap().unique_id() {
             return make_error(Error::UniqueIdMismatch);
         }
         Ok(File { center, meta, data })
@@ -549,7 +555,7 @@ impl FileSystemFile for File {
 
     fn delete(self) -> Result<(), Error> {
         let file_index = self.meta.get_ino() + 1;
-        let physical_len = self.data.parent_len();
+        let physical_len = self.data.as_ref().map_or(0, Diff::parent_len);
         let id_high = format!("{:08x}", self.center.id >> 32);
         let id_low = format!("{:08x}", self.center.id & 0xFFFF_FFFF);
         let fid_high = file_index / 126;
@@ -587,27 +593,36 @@ impl FileSystemFile for File {
     }
 
     fn read(&self, pos: usize, buf: &mut [u8]) -> Result<(), Error> {
+        if pos + buf.len() > self.len() {
+            return make_error(Error::OutOfBound);
+        }
         if buf.is_empty() {
             return Ok(());
         }
-        self.data.partition().read(pos, buf)
+        self.data.as_ref().unwrap().partition().read(pos, buf)
     }
 
     fn write(&self, pos: usize, buf: &[u8]) -> Result<(), Error> {
+        if pos + buf.len() > self.len() {
+            return make_error(Error::OutOfBound);
+        }
         if buf.is_empty() {
             return Ok(());
         }
         self.meta.check_exclusive()?;
-        self.data.partition().write(pos, buf)
+        self.data.as_ref().unwrap().partition().write(pos, buf)
     }
 
     fn len(&self) -> usize {
-        self.data.partition().len()
+        self.data.as_ref().map_or(0, |f| f.partition().len())
     }
 
     fn commit(&self) -> Result<(), Error> {
         self.meta.check_exclusive()?;
-        self.data.commit()
+        if let Some(f) = self.data.as_ref() {
+            f.commit()?;
+        }
+        Ok(())
     }
 }
 
@@ -673,9 +688,6 @@ impl FileSystemDir for Dir {
     fn new_sub_file(&self, name: [u8; 16], len: usize) -> Result<Self::FileType, Error> {
         if self.meta.open_sub_file(name).is_ok() || self.meta.open_sub_dir(name).is_ok() {
             return make_error(Error::AlreadyExist);
-        }
-        if len == 0 {
-            return make_error(Error::Unsupported);
         }
         let unique_id = 0xDEAD_BEEF;
         let meta = self.meta.new_sub_file(
