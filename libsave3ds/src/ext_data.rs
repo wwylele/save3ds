@@ -749,14 +749,11 @@ mod test {
 
     #[test]
     fn fs_fuzz() {
-        use crate::nand::*;
         use rand::prelude::*;
-        use tempfile::*;
         let mut rng = rand::thread_rng();
 
         for _ in 0..10 {
-            let nand_dir = tempdir().unwrap();
-            let nand = Rc::new(Nand::new(nand_dir.path().to_str().unwrap()).unwrap());
+            let nand = Rc::new(crate::sd_nand_common::test::VirtualFileSystem::new());
 
             let param = ExtDataFormatParam {
                 max_dir: rng.gen_range(10, 100),
