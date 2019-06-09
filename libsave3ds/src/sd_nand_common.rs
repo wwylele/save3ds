@@ -47,7 +47,8 @@ pub mod test {
         }
         fn remove(&self, path: &[&str]) -> Result<(), Error> {
             let path: Vec<_> = path.iter().map(|s| s.to_string()).collect();
-            self.files.borrow_mut().remove(&path);
+            let file = self.files.borrow_mut().remove(&path);
+            assert!(Rc::strong_count(&file.unwrap()) == 1);
             Ok(())
         }
         fn remove_dir(&self, _path: &[&str]) -> Result<(), Error> {
