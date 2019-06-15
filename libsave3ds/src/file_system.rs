@@ -111,9 +111,11 @@ pub mod test {
     ) where
         T::NameType: Clone + PartialEq + Eq + std::hash::Hash + std::fmt::Debug,
     {
+        use crate::misc::*;
         use rand::distributions::Standard;
         use rand::prelude::*;
         use std::collections::HashSet;
+
         let mut rng = rand::thread_rng();
 
         let mut dir_mirrors: Vec<DirMirror<T::NameType>> = vec![DirMirror {
@@ -314,7 +316,11 @@ pub mod test {
                                     );
                                 }
                                 Err(Error::NoSpace) => {
-                                    // assert_eq!(file_mirrors.len(), param.max_file as usize);
+                                    let stat = file_system.stat().unwrap();
+                                    assert!(
+                                        file_mirrors.len() == max_file as usize
+                                            || stat.free_blocks * stat.block_len < len
+                                    );
                                 }
                                 Ok(child) => {
                                     assert!(dir_mirrors.iter().all(|d| d.path != child_path));
@@ -441,7 +447,11 @@ pub mod test {
                             let len = gen_len();
                             match file.resize(len) {
                                 Err(Error::NoSpace) => {
-                                    //..
+                                    let stat = file_system.stat().unwrap();
+                                    let old_block = divide_up(old_len, stat.block_len);
+                                    let block = divide_up(len, stat.block_len);
+                                    assert!(block > old_block);
+                                    assert!(stat.free_blocks < block - old_block);
                                 }
                                 Ok(()) => {
                                     if len < old_len {
