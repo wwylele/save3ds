@@ -347,15 +347,6 @@ mod test {
     }
 
     #[test]
-    fn fuzz_template() {
-        let template = include_bytes!("00000000.disa");
-        for _ in 0..10 {
-            let raw_file = Rc::new(MemoryFile::new(template.to_vec()));
-            fuzz_one_file(raw_file, 0, None);
-        }
-    }
-
-    #[test]
     fn fuzz_one_partition() {
         let mut rng = rand::thread_rng();
         for _ in 0..10 {
