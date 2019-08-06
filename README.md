@@ -14,6 +14,35 @@ Note that the supported NAND format is in unpacked cleartext filesystem. If you 
 
 TODO:
  - Cartridge save data support
+ 
+## Build
+
+
+### Unix-like
+ 1. install pkg-config and FUSE library.
+   - Debian: `sudo apt-get install libfuse-dev pkg-config`
+   - CentOS: `sudo yum install fuse-devel pkgconfig`
+   - macOS: `brew cask install osxfuse && brew install pkg-config`
+   - FreeBSD: `pkg install fusefs-libs pkgconf`
+ 2. 
+ ```
+ cargo build
+ ```
+
+### Unix-like (no FUSE)
+```
+cd save3ds_fuse && cargo build --no-default-features
+````
+
+### Windows (no FUSE)
+
+```
+cargo build
+```
+
+### Tip
+
+This AES crate this program depends on chooses hardware/software implementation at compile time. Supply compiler options `-C target-feature=+aes` to enable hardware AES feature for better performance.
 
 ## Usage
 
@@ -131,10 +160,6 @@ Due to a bug (?) in 3DS, the last free block (128 bytes) of a title database arc
 ### `Quota.dat` for NAND extdata
 
 The format and function of the `Quota.dat` file is not fully investigated, and the program probably doesn't parse and update it properly for NAND extdata. This can potentially cause inconsistency if you modify a NAND extdata.
-
-## Tip
-
-This AES crate this program depends on chooses hardware/software implementation at compile time. Supply compiler options `-C target-feature=+aes` to enable hardware AES feature for better performance!
 
 ## License
 
