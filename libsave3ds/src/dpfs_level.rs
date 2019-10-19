@@ -5,8 +5,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 pub struct DpfsLevel {
-    selector: Rc<RandomAccessFile>,
-    pair: [Rc<RandomAccessFile>; 2],
+    selector: Rc<dyn RandomAccessFile>,
+    pair: [Rc<dyn RandomAccessFile>; 2],
     block_len: usize,
     len: usize,
     dirty: RefCell<Vec<u32>>,
@@ -14,8 +14,8 @@ pub struct DpfsLevel {
 
 impl DpfsLevel {
     pub fn new(
-        selector: Rc<RandomAccessFile>,
-        pair: [Rc<RandomAccessFile>; 2],
+        selector: Rc<dyn RandomAccessFile>,
+        pair: [Rc<dyn RandomAccessFile>; 2],
         block_len: usize,
     ) -> Result<DpfsLevel, Error> {
         let len = pair[0].len();
@@ -188,7 +188,7 @@ mod test {
     #[test] #[rustfmt::skip]
     fn test() {
         let selector = Rc::new(MemoryFile::new(vec![0xF0, 0x0F, 0xFF, 0x00, 0xA0, 0xAA, 0x55, 0x55]));
-        let pair: [Rc<RandomAccessFile>; 2] = [Rc::new(MemoryFile::new(vec![
+        let pair: [Rc<dyn RandomAccessFile>; 2] = [Rc::new(MemoryFile::new(vec![
             0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
             0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
             0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
@@ -267,7 +267,7 @@ mod test {
             let selector = Rc::new(MemoryFile::new(
                 rng.sample_iter(&Standard).take(selector_len).collect(),
             ));
-            let pair: [Rc<RandomAccessFile>; 2] = [
+            let pair: [Rc<dyn RandomAccessFile>; 2] = [
                 Rc::new(MemoryFile::new(
                     rng.sample_iter(&Standard).take(len).collect(),
                 )),

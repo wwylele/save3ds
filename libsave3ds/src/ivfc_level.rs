@@ -11,8 +11,8 @@ const BLOCK_MODIFIED: u8 = 2;
 const BLOCK_BROKEN: u8 = 3;
 
 pub struct IvfcLevel {
-    hash: Rc<RandomAccessFile>,
-    data: Rc<RandomAccessFile>,
+    hash: Rc<dyn RandomAccessFile>,
+    data: Rc<dyn RandomAccessFile>,
     block_len: usize,
     len: usize,
     status: RefCell<Vec<u8>>,
@@ -20,8 +20,8 @@ pub struct IvfcLevel {
 
 impl IvfcLevel {
     pub fn new(
-        hash: Rc<RandomAccessFile>,
-        data: Rc<RandomAccessFile>,
+        hash: Rc<dyn RandomAccessFile>,
+        data: Rc<dyn RandomAccessFile>,
         block_len: usize,
     ) -> Result<IvfcLevel, Error> {
         let len = data.len();

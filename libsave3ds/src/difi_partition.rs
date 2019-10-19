@@ -270,7 +270,10 @@ impl DifiPartition {
         (info.descriptor_len, info.partition_len)
     }
 
-    pub fn format(descriptor: &RandomAccessFile, param: &DifiPartitionParam) -> Result<(), Error> {
+    pub fn format(
+        descriptor: &dyn RandomAccessFile,
+        param: &DifiPartitionParam,
+    ) -> Result<(), Error> {
         let info = DifiPartition::calculate_info(param);
         let ivfc_descriptor_offset = info.difi_header.ivfc_descriptor_offset as usize;
         let dpfs_descriptor_offset = info.difi_header.dpfs_descriptor_offset as usize;
@@ -282,8 +285,8 @@ impl DifiPartition {
     }
 
     pub fn new(
-        descriptor: Rc<RandomAccessFile>,
-        partition: Rc<RandomAccessFile>,
+        descriptor: Rc<dyn RandomAccessFile>,
+        partition: Rc<dyn RandomAccessFile>,
     ) -> Result<DifiPartition, Error> {
         let header: DifiHeader = read_struct(descriptor.as_ref(), 0)?;
 
@@ -314,7 +317,7 @@ impl DifiPartition {
 
         let dpfs_level0 = Rc::new(SubFile::new(descriptor.clone(), 0x39, 1)?);
 
-        let dpfs_level1_pair: [Rc<RandomAccessFile>; 2] = [
+        let dpfs_level1_pair: [Rc<dyn RandomAccessFile>; 2] = [
             Rc::new(SubFile::new(
                 partition.clone(),
                 dpfs.level1_offset as usize,
@@ -327,7 +330,7 @@ impl DifiPartition {
             )?),
         ];
 
-        let dpfs_level2_pair: [Rc<RandomAccessFile>; 2] = [
+        let dpfs_level2_pair: [Rc<dyn RandomAccessFile>; 2] = [
             Rc::new(SubFile::new(
                 partition.clone(),
                 dpfs.level2_offset as usize,
@@ -340,7 +343,7 @@ impl DifiPartition {
             )?),
         ];
 
-        let dpfs_level3_pair: [Rc<RandomAccessFile>; 2] = [
+        let dpfs_level3_pair: [Rc<dyn RandomAccessFile>; 2] = [
             Rc::new(SubFile::new(
                 partition.clone(),
                 dpfs.level3_offset as usize,

@@ -254,7 +254,7 @@ impl SaveData {
         SaveData::new(file, save_data_type)
     }
 
-    fn get_signer(save_data_type: SaveDataType) -> Option<(Box<Signer>, [u8; 16])> {
+    fn get_signer(save_data_type: SaveDataType) -> Option<(Box<dyn Signer>, [u8; 16])> {
         match save_data_type {
             SaveDataType::Bare => None,
             SaveDataType::Nand(key, id) => Some((Box::new(NandSaveSigner { id }), key)),
@@ -263,7 +263,7 @@ impl SaveData {
     }
 
     pub fn format(
-        file: Rc<RandomAccessFile>,
+        file: Rc<dyn RandomAccessFile>,
         save_data_type: SaveDataType,
         param: &SaveDataFormatParam,
         block_count: usize,
@@ -298,7 +298,7 @@ impl SaveData {
 
         Fat::format(fat_table.as_ref())?;
 
-        let data: Rc<RandomAccessFile> = if disa.partition_count() == 2 {
+        let data: Rc<dyn RandomAccessFile> = if disa.partition_count() == 2 {
             disa[1].clone()
         } else {
             Rc::new(SubFile::new(
@@ -398,7 +398,7 @@ impl SaveData {
     }
 
     pub fn new(
-        file: Rc<RandomAccessFile>,
+        file: Rc<dyn RandomAccessFile>,
         save_data_type: SaveDataType,
     ) -> Result<SaveData, Error> {
         let disa = Rc::new(Disa::new(file, SaveData::get_signer(save_data_type))?);
@@ -429,7 +429,7 @@ impl SaveData {
             (fs_info.fat_size + 1) as usize * 8,
         )?);
 
-        let data: Rc<RandomAccessFile> = if disa.partition_count() == 2 {
+        let data: Rc<dyn RandomAccessFile> = if disa.partition_count() == 2 {
             disa[1].clone()
         } else {
             Rc::new(SubFile::new(
@@ -441,7 +441,7 @@ impl SaveData {
 
         let fat = Fat::new(fat_table, data, fs_info.block_len as usize)?;
 
-        let dir_table: Rc<RandomAccessFile> = if disa.partition_count() == 2 {
+        let dir_table: Rc<dyn RandomAccessFile> = if disa.partition_count() == 2 {
             Rc::new(SubFile::new(
                 disa[0].clone(),
                 fs_info.dir_table.to_offset(),
@@ -452,7 +452,7 @@ impl SaveData {
             Rc::new(FatFile::open(fat.clone(), block)?)
         };
 
-        let file_table: Rc<RandomAccessFile> = if disa.partition_count() == 2 {
+        let file_table: Rc<dyn RandomAccessFile> = if disa.partition_count() == 2 {
             Rc::new(SubFile::new(
                 disa[0].clone(),
                 fs_info.file_table.to_offset(),
@@ -677,7 +677,7 @@ impl FileSystemDir for Dir {
             SaveFile {
                 next: 0,
                 padding1: 0,
-                block: block,
+                block,
                 size: len as u64,
                 padding2: 0,
             },
@@ -734,7 +734,7 @@ impl FileSystem for SaveData {
 }
 
 #[cfg(test)]
-#[allow(clippy::cyclomatic_complexity)]
+#[allow(clippy::cognitive_complexity)]
 mod test {
     use crate::save_data::*;
     #[test]

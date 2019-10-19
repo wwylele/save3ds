@@ -93,8 +93,8 @@ pub struct MetaTableStat {
 }
 
 struct MetaTable<KeyType, InfoType> {
-    hash: Rc<RandomAccessFile>,
-    table: Rc<RandomAccessFile>,
+    hash: Rc<dyn RandomAccessFile>,
+    table: Rc<dyn RandomAccessFile>,
 
     buckets: usize,
 
@@ -110,8 +110,8 @@ struct MetaTable<KeyType, InfoType> {
 
 impl<KeyType: ByteStruct + PartialEq, InfoType: ByteStruct> MetaTable<KeyType, InfoType> {
     fn format(
-        hash: &RandomAccessFile,
-        table: &RandomAccessFile,
+        hash: &dyn RandomAccessFile,
+        table: &dyn RandomAccessFile,
         entry_count: usize,
     ) -> Result<(), Error> {
         hash.write(0, &vec![0; hash.len()])?;
@@ -138,8 +138,8 @@ impl<KeyType: ByteStruct + PartialEq, InfoType: ByteStruct> MetaTable<KeyType, I
     }
 
     fn new(
-        hash: Rc<RandomAccessFile>,
-        table: Rc<RandomAccessFile>,
+        hash: Rc<dyn RandomAccessFile>,
+        table: Rc<dyn RandomAccessFile>,
     ) -> Result<MetaTable<KeyType, InfoType>, Error> {
         assert!(KeyType::BYTE_LEN % 4 == 0);
 
@@ -346,11 +346,11 @@ impl<
     > FsMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>
 {
     pub fn format(
-        dir_hash: Rc<RandomAccessFile>,
-        dir_table: Rc<RandomAccessFile>,
+        dir_hash: Rc<dyn RandomAccessFile>,
+        dir_table: Rc<dyn RandomAccessFile>,
         dir_entry_count: usize,
-        file_hash: Rc<RandomAccessFile>,
-        file_table: Rc<RandomAccessFile>,
+        file_hash: Rc<dyn RandomAccessFile>,
+        file_table: Rc<dyn RandomAccessFile>,
         file_entry_count: usize,
     ) -> Result<(), Error> {
         MetaTable::<DirKeyType, DirInfoType>::format(
@@ -369,10 +369,10 @@ impl<
     }
 
     pub fn new(
-        dir_hash: Rc<RandomAccessFile>,
-        dir_table: Rc<RandomAccessFile>,
-        file_hash: Rc<RandomAccessFile>,
-        file_table: Rc<RandomAccessFile>,
+        dir_hash: Rc<dyn RandomAccessFile>,
+        dir_table: Rc<dyn RandomAccessFile>,
+        file_hash: Rc<dyn RandomAccessFile>,
+        file_table: Rc<dyn RandomAccessFile>,
     ) -> Result<Rc<FsMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>>, Error> {
         Ok(Rc::new(FsMeta {
             dirs: MetaTable::new(dir_hash, dir_table)?,
@@ -667,14 +667,14 @@ mod test {
     fn borrow_mut_two<T>(a: &mut [T], i: usize, j: usize) -> (&mut T, &mut T) {
         assert!(i != j);
         if i > j {
-            let (p, q) = borrow_mut_two(a, j, i);
-            return (q, p);
+            let (item_j, item_i) = borrow_mut_two(a, j, i);
+            return (item_i, item_j);
         }
-        let (m, n) = a.split_at_mut(j);
-        (&mut m[i], &mut n[0])
+        let (left, right) = a.split_at_mut(j);
+        (&mut left[i], &mut right[0])
     }
 
-    #[allow(clippy::cyclomatic_complexity)]
+    #[allow(clippy::cognitive_complexity)]
     #[test]
     fn fs_fuzz() {
         use crate::save_data::SaveFile;

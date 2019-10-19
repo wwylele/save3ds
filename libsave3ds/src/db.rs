@@ -131,7 +131,7 @@ pub enum DbType {
 }
 
 struct FakeSizeFile {
-    parent: Rc<RandomAccessFile>,
+    parent: Rc<dyn RandomAccessFile>,
     len: usize,
 }
 
@@ -184,8 +184,12 @@ pub struct Db {
 }
 
 impl Db {
-    pub fn new(file: Rc<RandomAccessFile>, db_type: DbType, key: [u8; 16]) -> Result<Db, Error> {
-        let signer: (Box<Signer>, [u8; 16]) = (
+    pub fn new(
+        file: Rc<dyn RandomAccessFile>,
+        db_type: DbType,
+        key: [u8; 16],
+    ) -> Result<Db, Error> {
+        let signer: (Box<dyn Signer>, [u8; 16]) = (
             Box::new(DbSigner {
                 id: match db_type {
                     DbType::Ticket => 0,
@@ -272,7 +276,7 @@ impl Db {
 
         println!("Database file end fixup: 0x{:x}", data_delta);
 
-        let data: Rc<RandomAccessFile> = Rc::new(FakeSizeFile {
+        let data: Rc<dyn RandomAccessFile> = Rc::new(FakeSizeFile {
             parent: Rc::new(SubFile::new(
                 without_pre.clone(),
                 fs_info.data_offset as usize,
@@ -283,12 +287,12 @@ impl Db {
 
         let fat = Fat::new(fat_table, data, fs_info.block_len as usize)?;
 
-        let dir_table: Rc<RandomAccessFile> = Rc::new(FatFile::open(
+        let dir_table: Rc<dyn RandomAccessFile> = Rc::new(FatFile::open(
             fat.clone(),
             fs_info.dir_table.block_index as usize,
         )?);
 
-        let file_table: Rc<RandomAccessFile> = Rc::new(FatFile::open(
+        let file_table: Rc<dyn RandomAccessFile> = Rc::new(FatFile::open(
             fat.clone(),
             fs_info.file_table.block_index as usize,
         )?);
@@ -471,7 +475,7 @@ impl FileSystemDir for Dir {
             DbFile {
                 next: 0,
                 padding1: 0,
-                block: block,
+                block,
                 size: len as u64,
                 padding2: 0,
             },

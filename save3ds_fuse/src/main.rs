@@ -296,7 +296,7 @@ where
             file_fh_map: HashMap::new(),
             dir_fh_map: HashMap::new(),
             next_fh: 1,
-            read_only: read_only,
+            read_only,
             uid: 0,
             gid: 0,
         }
@@ -316,8 +316,8 @@ fn make_dir_attr(read_only: bool, uid: u32, gid: u32, ino: u64, sub_file_count: 
         kind: FileType::Directory,
         perm: if read_only { 0o555 } else { 0o755 },
         nlink: 2 + sub_file_count as u32,
-        uid: uid,
-        gid: gid,
+        uid,
+        gid,
         rdev: 0,
         flags: 0,
     }
@@ -336,8 +336,8 @@ fn make_file_attr(read_only: bool, uid: u32, gid: u32, ino: u64, file_size: usiz
         kind: FileType::RegularFile,
         perm: if read_only { 0o444 } else { 0o644 },
         nlink: 1,
-        uid: uid,
-        gid: gid,
+        uid,
+        gid,
         rdev: 0,
         flags: 0,
     }
@@ -612,7 +612,6 @@ where
                     Err(Error::NoSpace) => reply.error(ENOSPC),
                     Err(_) => reply.error(EIO),
                 }
-                return;
             }
         }
     }
@@ -665,7 +664,6 @@ where
                     Err(Error::NoSpace) => reply.error(ENOSPC),
                     Err(_) => reply.error(EIO),
                 }
-                return;
             }
         }
     }
@@ -1086,7 +1084,7 @@ fn get_default_bucket(n: usize) -> usize {
 
 fn to_ext_data_format_param(
     raw: HashMap<String, String>,
-) -> Result<ExtDataFormatParam, Box<std::error::Error>> {
+) -> Result<ExtDataFormatParam, Box<dyn std::error::Error>> {
     let max_dir = raw
         .get("max_dir")
         .map(|s| s.parse::<usize>())
@@ -1122,7 +1120,7 @@ fn to_ext_data_format_param(
 fn to_save_data_format_param(
     raw: HashMap<String, String>,
     default_block_len: usize,
-) -> Result<(SaveDataFormatParam, usize), Box<std::error::Error>> {
+) -> Result<(SaveDataFormatParam, usize), Box<dyn std::error::Error>> {
     let block_len = raw
         .get("block_len")
         .map(|s| s.parse::<usize>())
@@ -1187,7 +1185,7 @@ fn to_save_data_format_param(
     ))
 }
 
-fn main() -> Result<(), Box<std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     let program = args[0].clone();
 

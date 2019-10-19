@@ -63,7 +63,7 @@ pub trait FileSystem {
 }
 
 #[cfg(test)]
-#[allow(clippy::cyclomatic_complexity)]
+#[allow(clippy::cognitive_complexity)]
 pub mod test {
     fn is_one_prefix<T: PartialEq>(short: &[T], long: &[T]) -> bool {
         if short.len() + 1 != long.len() {

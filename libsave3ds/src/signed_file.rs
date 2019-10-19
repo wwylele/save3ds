@@ -16,18 +16,18 @@ pub trait Signer {
 }
 
 pub struct SignedFile {
-    signature: Rc<RandomAccessFile>,
-    data: Rc<RandomAccessFile>,
-    block_provider: Box<Signer>,
+    signature: Rc<dyn RandomAccessFile>,
+    data: Rc<dyn RandomAccessFile>,
+    block_provider: Box<dyn Signer>,
     key: [u8; 16],
     len: usize,
 }
 
 impl SignedFile {
     pub fn new_unverified(
-        signature: Rc<RandomAccessFile>,
-        data: Rc<RandomAccessFile>,
-        block_provider: Box<Signer>,
+        signature: Rc<dyn RandomAccessFile>,
+        data: Rc<dyn RandomAccessFile>,
+        block_provider: Box<dyn Signer>,
         key: [u8; 16],
     ) -> Result<SignedFile, Error> {
         if signature.len() != 16 {
@@ -45,9 +45,9 @@ impl SignedFile {
     }
 
     pub fn new(
-        signature: Rc<RandomAccessFile>,
-        data: Rc<RandomAccessFile>,
-        block_provider: Box<Signer>,
+        signature: Rc<dyn RandomAccessFile>,
+        data: Rc<dyn RandomAccessFile>,
+        block_provider: Box<dyn Signer>,
         key: [u8; 16],
     ) -> Result<SignedFile, Error> {
         if signature.len() != 16 {

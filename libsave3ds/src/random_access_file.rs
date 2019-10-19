@@ -9,13 +9,17 @@ pub trait RandomAccessFile {
     fn commit(&self) -> Result<(), Error>;
 }
 
-pub fn read_struct<T: ByteStruct>(f: &RandomAccessFile, pos: usize) -> Result<T, Error> {
+pub fn read_struct<T: ByteStruct>(f: &dyn RandomAccessFile, pos: usize) -> Result<T, Error> {
     let mut buf = vec![0; T::BYTE_LEN]; // array somehow broken with the associated item as size
     f.borrow().read(pos, &mut buf)?;
     Ok(T::read_bytes(&buf))
 }
 
-pub fn write_struct<T: ByteStruct>(f: &RandomAccessFile, pos: usize, data: T) -> Result<(), Error> {
+pub fn write_struct<T: ByteStruct>(
+    f: &dyn RandomAccessFile,
+    pos: usize,
+    data: T,
+) -> Result<(), Error> {
     let mut buf = vec![0; T::BYTE_LEN]; // array somehow broken with the associated item as size
     data.write_bytes(&mut buf);
     f.borrow().write(pos, &buf)?;

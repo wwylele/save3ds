@@ -9,7 +9,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 pub struct AesCtrFile {
-    data: Rc<RandomAccessFile>,
+    data: Rc<dyn RandomAccessFile>,
     aes128: Aes128,
     ctr: [u8; 16],
     len: usize,
@@ -25,7 +25,7 @@ fn seek_ctr(ctr: &mut [u8; 16], mut block_index: usize) {
 }
 
 impl AesCtrFile {
-    pub fn new(data: Rc<RandomAccessFile>, key: [u8; 16], ctr: [u8; 16]) -> AesCtrFile {
+    pub fn new(data: Rc<dyn RandomAccessFile>, key: [u8; 16], ctr: [u8; 16]) -> AesCtrFile {
         let len = data.len();
         let aes128 = Aes128::new(GenericArray::from_slice(&key));
         AesCtrFile {

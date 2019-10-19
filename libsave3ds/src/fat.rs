@@ -21,8 +21,8 @@ struct Entry {
 }
 
 pub struct Fat {
-    table: Rc<RandomAccessFile>,
-    data: Rc<RandomAccessFile>,
+    table: Rc<dyn RandomAccessFile>,
+    data: Rc<dyn RandomAccessFile>,
     block_len: usize,
     free_blocks: Cell<usize>,
 }
@@ -50,7 +50,7 @@ fn index_good_to_bad(index: Option<usize>) -> u32 {
     index.map_or(0, |i| i as u32 + 1)
 }
 
-fn get_node(table: &RandomAccessFile, index: usize) -> Result<Node, Error> {
+fn get_node(table: &dyn RandomAccessFile, index: usize) -> Result<Node, Error> {
     let node_start: Entry = read_struct(table, (index + 1) * Entry::BYTE_LEN)?;
     if (node_start.u.flag == 1) != (node_start.u.index == 0) {
         return make_error(Error::BrokenFat);
@@ -84,7 +84,7 @@ fn get_node(table: &RandomAccessFile, index: usize) -> Result<Node, Error> {
     })
 }
 
-fn set_node(table: &RandomAccessFile, index: usize, node: Node) -> Result<(), Error> {
+fn set_node(table: &dyn RandomAccessFile, index: usize, node: Node) -> Result<(), Error> {
     let node_start = Entry {
         u: EntryHalf {
             flag: if node.prev.is_none() { 1 } else { 0 },
@@ -116,7 +116,7 @@ fn set_node(table: &RandomAccessFile, index: usize, node: Node) -> Result<(), Er
     Ok(())
 }
 
-fn get_head(table: &RandomAccessFile) -> Result<Option<usize>, Error> {
+fn get_head(table: &dyn RandomAccessFile) -> Result<Option<usize>, Error> {
     let head: Entry = read_struct(table, 0)?;
     if head.u.index != 0 || head.u.flag != 0 || head.v.flag != 0 {
         return make_error(Error::BrokenFat);
@@ -124,7 +124,7 @@ fn get_head(table: &RandomAccessFile) -> Result<Option<usize>, Error> {
     Ok(index_bad_to_good(head.v.index))
 }
 
-fn set_head(table: &RandomAccessFile, index: Option<usize>) -> Result<(), Error> {
+fn set_head(table: &dyn RandomAccessFile, index: Option<usize>) -> Result<(), Error> {
     let head = Entry {
         u: EntryHalf { flag: 0, index: 0 },
         v: EntryHalf {
@@ -137,7 +137,7 @@ fn set_head(table: &RandomAccessFile, index: Option<usize>) -> Result<(), Error>
 
 // Takes some blocks from free blocks. The first allocated node has prev=None
 // Precondition: there are sufficent free blocks
-fn allocate(table: &RandomAccessFile, mut block_count: usize) -> Result<Vec<BlockMap>, Error> {
+fn allocate(table: &dyn RandomAccessFile, mut block_count: usize) -> Result<Vec<BlockMap>, Error> {
     let mut block_list = Vec::with_capacity(block_count);
 
     let mut cur = get_head(table)?.unwrap();
@@ -229,7 +229,7 @@ fn allocate(table: &RandomAccessFile, mut block_count: usize) -> Result<Vec<Bloc
 // Takes some blocks from free blocks.
 // Precondition: the first node has prev=None, block_list contain well-formed node.
 // Remember to modify the first node if this list is split from a larger list!
-fn free(table: &RandomAccessFile, block_list: &[BlockMap]) -> Result<(), Error> {
+fn free(table: &dyn RandomAccessFile, block_list: &[BlockMap]) -> Result<(), Error> {
     let last_node_index = block_list.last().unwrap().node_start_index;
     let maybe_free_front_index = get_head(table)?;
     if let Some(free_front_index) = maybe_free_front_index {
@@ -252,7 +252,7 @@ fn free(table: &RandomAccessFile, block_list: &[BlockMap]) -> Result<(), Error> 
 }
 
 fn iterate_fat_entry(
-    table: &RandomAccessFile,
+    table: &dyn RandomAccessFile,
     first_entry: usize,
     mut callback: impl FnMut(usize, usize),
 ) -> Result<(), Error> {
@@ -275,7 +275,7 @@ fn iterate_fat_entry(
 }
 
 impl Fat {
-    pub fn format(table: &RandomAccessFile) -> Result<(), Error> {
+    pub fn format(table: &dyn RandomAccessFile) -> Result<(), Error> {
         let block_count = table.len() / 8 - 1;
         set_head(table, Some(0))?;
         set_node(
@@ -290,8 +290,8 @@ impl Fat {
     }
 
     pub fn new(
-        table: Rc<RandomAccessFile>,
-        data: Rc<RandomAccessFile>,
+        table: Rc<dyn RandomAccessFile>,
+        data: Rc<dyn RandomAccessFile>,
         block_len: usize,
     ) -> Result<Rc<Fat>, Error> {
         let table_len = table.len();

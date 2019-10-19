@@ -27,7 +27,7 @@ struct DiffHeader {
 
 pub struct Diff {
     parent_len: usize,
-    header_file: Rc<RandomAccessFile>,
+    header_file: Rc<dyn RandomAccessFile>,
     table_upper: Rc<DualFile>,
     table_lower: Rc<IvfcLevel>,
     partition: Rc<DifiPartition>,
@@ -67,14 +67,14 @@ impl Diff {
     }
 
     pub fn format(
-        file: Rc<RandomAccessFile>,
-        signer: Option<(Box<Signer>, [u8; 16])>,
+        file: Rc<dyn RandomAccessFile>,
+        signer: Option<(Box<dyn Signer>, [u8; 16])>,
         param: &DifiPartitionParam,
         unique_id: u64,
     ) -> Result<(), Error> {
         file.write(0, &[0; 0x200])?;
         let header_file_bare = Rc::new(SubFile::new(file.clone(), 0x100, 0x100)?);
-        let header_file: Rc<RandomAccessFile> = match signer {
+        let header_file: Rc<dyn RandomAccessFile> = match signer {
             None => header_file_bare,
             Some((signer, key)) => Rc::new(SignedFile::new_unverified(
                 Rc::new(SubFile::new(file.clone(), 0, 0x10)?),
@@ -97,7 +97,7 @@ impl Diff {
             active_table: 1,
             padding: [0; 3],
             sha: [0; 0x20],
-            unique_id: unique_id,
+            unique_id,
         };
 
         write_struct(header_file.as_ref(), 0, header)?;
@@ -119,12 +119,12 @@ impl Diff {
     }
 
     pub fn new(
-        file: Rc<RandomAccessFile>,
-        signer: Option<(Box<Signer>, [u8; 16])>,
+        file: Rc<dyn RandomAccessFile>,
+        signer: Option<(Box<dyn Signer>, [u8; 16])>,
     ) -> Result<Diff, Error> {
         let parent_len = file.len();
         let header_file_bare = Rc::new(SubFile::new(file.clone(), 0x100, 0x100)?);
-        let header_file: Rc<RandomAccessFile> = match signer {
+        let header_file: Rc<dyn RandomAccessFile> = match signer {
             None => header_file_bare,
             Some((signer, key)) => Rc::new(SignedFile::new(
                 Rc::new(SubFile::new(file.clone(), 0, 0x10)?),
@@ -143,7 +143,7 @@ impl Diff {
 
         let table_hash = Rc::new(SubFile::new(header_file.clone(), 0x34, 0x20)?);
 
-        let table_pair: [Rc<RandomAccessFile>; 2] = [
+        let table_pair: [Rc<dyn RandomAccessFile>; 2] = [
             Rc::new(SubFile::new(
                 file.clone(),
                 header.primary_table_offset as usize,

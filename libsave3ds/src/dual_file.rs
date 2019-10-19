@@ -4,16 +4,16 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 pub struct DualFile {
-    selector: Rc<RandomAccessFile>,
-    pair: [Rc<RandomAccessFile>; 2],
+    selector: Rc<dyn RandomAccessFile>,
+    pair: [Rc<dyn RandomAccessFile>; 2],
     modified: Cell<u8>,
     len: usize,
 }
 
 impl DualFile {
     pub fn new(
-        selector: Rc<RandomAccessFile>,
-        pair: [Rc<RandomAccessFile>; 2],
+        selector: Rc<dyn RandomAccessFile>,
+        pair: [Rc<dyn RandomAccessFile>; 2],
     ) -> Result<DualFile, Error> {
         let len = pair[0].len();
         if pair[1].len() != len {
@@ -97,7 +97,7 @@ mod test {
         for _ in 0..10 {
             let len = rng.gen_range(1, 10_000);
             let selector = Rc::new(MemoryFile::new(vec![0; 1]));
-            let pair: [Rc<RandomAccessFile>; 2] = [
+            let pair: [Rc<dyn RandomAccessFile>; 2] = [
                 Rc::new(MemoryFile::new(
                     rng.sample_iter(&Standard).take(len).collect(),
                 )),

@@ -100,7 +100,7 @@ pub struct ExtDataFormatParam {
 }
 
 struct ExtDataInner {
-    sd_nand: Rc<SdNandFileSystem>,
+    sd_nand: Rc<dyn SdNandFileSystem>,
     base_path: Vec<String>,
     id: u64,
     fs: Rc<FsMeta>,
@@ -116,7 +116,7 @@ pub struct ExtData {
 
 impl ExtData {
     pub fn format(
-        sd_nand: &SdNandFileSystem,
+        sd_nand: &dyn SdNandFileSystem,
         base_path: &[&str],
         id: u64,
         key: [u8; 16],
@@ -332,7 +332,7 @@ impl ExtData {
     }
 
     pub fn new(
-        sd_nand: Rc<SdNandFileSystem>,
+        sd_nand: Rc<dyn SdNandFileSystem>,
         base_path: &[&str],
         id: u64,
         key: [u8; 16],
@@ -403,7 +403,7 @@ impl ExtData {
             (fs_info.fat_size + 1) as usize * 8,
         )?);
 
-        let data: Rc<RandomAccessFile> = Rc::new(SubFile::new(
+        let data: Rc<dyn RandomAccessFile> = Rc::new(SubFile::new(
             meta_file.partition().clone(),
             fs_info.data_offset as usize,
             (fs_info.data_block_count * fs_info.block_len) as usize,
@@ -411,12 +411,12 @@ impl ExtData {
 
         let fat = Fat::new(fat_table, data, fs_info.block_len as usize)?;
 
-        let dir_table: Rc<RandomAccessFile> = Rc::new(FatFile::open(
+        let dir_table: Rc<dyn RandomAccessFile> = Rc::new(FatFile::open(
             fat.clone(),
             fs_info.dir_table.block_index as usize,
         )?);
 
-        let file_table: Rc<RandomAccessFile> = Rc::new(FatFile::open(
+        let file_table: Rc<dyn RandomAccessFile> = Rc::new(FatFile::open(
             fat.clone(),
             fs_info.file_table.block_index as usize,
         )?);

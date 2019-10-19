@@ -3,13 +3,17 @@ use crate::random_access_file::*;
 use std::rc::Rc;
 
 pub struct SubFile {
-    parent: Rc<RandomAccessFile>,
+    parent: Rc<dyn RandomAccessFile>,
     begin: usize,
     len: usize,
 }
 
 impl SubFile {
-    pub fn new(parent: Rc<RandomAccessFile>, begin: usize, len: usize) -> Result<SubFile, Error> {
+    pub fn new(
+        parent: Rc<dyn RandomAccessFile>,
+        begin: usize,
+        len: usize,
+    ) -> Result<SubFile, Error> {
         if begin + len > parent.len() {
             return make_error(Error::OutOfBound);
         }

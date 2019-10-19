@@ -3,7 +3,7 @@ use crate::random_access_file::*;
 use std::rc::Rc;
 
 pub trait SdNandFileSystem {
-    fn open(&self, path: &[&str], write: bool) -> Result<Rc<RandomAccessFile>, Error>;
+    fn open(&self, path: &[&str], write: bool) -> Result<Rc<dyn RandomAccessFile>, Error>;
     fn create(&self, path: &[&str], len: usize) -> Result<(), Error>;
     fn remove(&self, path: &[&str]) -> Result<(), Error>;
     fn remove_dir(&self, path: &[&str]) -> Result<(), Error>;
@@ -18,7 +18,7 @@ pub mod test {
     use std::rc::Rc;
 
     pub struct VirtualFileSystem {
-        files: RefCell<HashMap<Vec<String>, Rc<RandomAccessFile>>>,
+        files: RefCell<HashMap<Vec<String>, Rc<dyn RandomAccessFile>>>,
     }
 
     impl VirtualFileSystem {
@@ -30,7 +30,7 @@ pub mod test {
     }
 
     impl SdNandFileSystem for VirtualFileSystem {
-        fn open(&self, path: &[&str], _write: bool) -> Result<Rc<RandomAccessFile>, Error> {
+        fn open(&self, path: &[&str], _write: bool) -> Result<Rc<dyn RandomAccessFile>, Error> {
             let path: Vec<_> = path.iter().map(|s| s.to_string()).collect();
             self.files
                 .borrow()
