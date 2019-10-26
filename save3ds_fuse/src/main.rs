@@ -1192,6 +1192,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut opts = Options::new();
     opts.optopt("", "bare", "mount a bare DISA file", "FILE");
     opts.optopt("b", "boot9", "boot9.bin file path", "FILE");
+    opts.optopt("c", "cart", "mount a cartridge save", "FILE");
     opts.optopt(
         "",
         "db",
@@ -1206,13 +1207,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "format the specified archive",
         "[\"\"|param1:value1[,...]]",
     );
+    opts.optopt("g", "game", "cartridge ROM in CCI/NCSD format", "FILE");
     opts.optflag("h", "help", "print this help menu");
     opts.optflag("i", "import", "import the content instead of mounting");
+    opts.optopt(
+        "k",
+        "key",
+        "AES slot 0x2F key Y for decrypting v6.0 cartridge save",
+        "HEX|FILE",
+    );
     opts.optopt("m", "movable", "movable.sed file path", "FILE");
     opts.optopt("", "nand", "NAND root path", "DIR");
     opts.optopt("", "nandext", "mount the NAND Extdata with the ID", "ID");
     opts.optopt("", "nandsave", "mount the NAND save with the ID", "ID");
     opts.optopt("o", "otp", "OTP file path", "FILE");
+    opts.optopt("p", "priv", "cartridge private header path", "FILE");
     opts.optflag("r", "readonly", "mount as read-only file system");
     opts.optopt("", "sd", "SD root path", "DIR");
     opts.optopt("", "sdext", "mount the SD Extdata with the ID", "ID");
@@ -1243,6 +1252,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let movable_path = matches.opt_str("movable");
     let otp_path = matches.opt_str("otp");
     let bare_path = matches.opt_str("bare");
+    let cart_path = matches.opt_str("cart");
     let sd_path = matches.opt_str("sd");
     let sd_save_id = matches.opt_str("sdsave");
     let sd_ext_id = matches.opt_str("sdext");
@@ -1251,6 +1261,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let nand_save_id = matches.opt_str("nandsave");
     let db_type = matches.opt_str("db");
     let format_param = matches.opt_str("format");
+    let priv_path = matches.opt_str("priv");
+    let game_path = matches.opt_str("game");
+    let x2f_key_y = matches.opt_str("key");
+
+    let x2f_key_y = x2f_key_y
+        .map(|s| -> std::io::Result<_> {
+            let mut key = [0; 16];
+            if s.len() == 32 {
+                let mut success = true;
+                for i in 0..16 {
+                    if let Ok(v) = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16) {
+                        key[i] = v;
+                    } else {
+                        success = false;
+                        break;
+                    }
+                }
+                if success {
+                    return Ok(key);
+                }
+            }
+            let mut file = std::fs::File::open(s)?;
+            file.read_exact(&mut key)?;
+            Ok(key)
+        })
+        .transpose()?;
 
     let format_param: Option<HashMap<String, String>> = format_param.map(|s| {
         s.split(',')
@@ -1286,6 +1322,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &nand_ext_id,
         &bare_path,
         &db_type,
+        &cart_path,
     ]
     .iter()
     .map(|x| if x.is_none() { 0 } else { 1 })
@@ -1294,12 +1331,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         println!(
             "One and only one of the following arguments must be supplied:
-    --sdext, --sdsave, --nandsave, --nandext, --bare, --db"
+    --sdext, --sdsave, --nandsave, --nandext, --bare, --db, --cart"
         );
         return Ok(());
     }
 
-    let resource = Resource::new(boot9_path, movable_path, sd_path, nand_path, otp_path)?;
+    let resource = Resource::new(
+        boot9_path,
+        movable_path,
+        sd_path,
+        nand_path,
+        otp_path,
+        priv_path,
+        game_path,
+        x2f_key_y,
+    )?;
 
     if let Some(bare) = bare_path {
         if let Some(format_param) = format_param {
@@ -1387,6 +1433,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         start(
             resource.open_db(db_type, !read_only)?,
+            operation,
+            mountpoint,
+        )?
+    } else if let Some(cart) = cart_path {
+        start(
+            resource.open_cart_save(&cart, !read_only)?,
             operation,
             mountpoint,
         )?

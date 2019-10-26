@@ -20,6 +20,7 @@ pub enum Error {
     UniqueIdMismatch,
     BrokenOtp,
     Busy,
+    BrokenGame,
 }
 
 impl fmt::Display for Error {
@@ -54,6 +55,7 @@ impl fmt::Display for Error {
                 f,
                 "The file or directory is currently used by other program"
             ),
+            Error::BrokenGame => write!(f, "Provided game file is broken"),
         }
     }
 }

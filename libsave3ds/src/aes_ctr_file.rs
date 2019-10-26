@@ -14,6 +14,7 @@ pub struct AesCtrFile {
     ctr: [u8; 16],
     len: usize,
     cache: RefCell<LruCache<usize, [u8; 16]>>,
+    repeat_ctr: bool,
 }
 
 fn seek_ctr(ctr: &mut [u8; 16], mut block_index: usize) {
@@ -25,7 +26,12 @@ fn seek_ctr(ctr: &mut [u8; 16], mut block_index: usize) {
 }
 
 impl AesCtrFile {
-    pub fn new(data: Rc<dyn RandomAccessFile>, key: [u8; 16], ctr: [u8; 16]) -> AesCtrFile {
+    pub fn new(
+        data: Rc<dyn RandomAccessFile>,
+        key: [u8; 16],
+        ctr: [u8; 16],
+        repeat_ctr: bool,
+    ) -> AesCtrFile {
         let len = data.len();
         let aes128 = Aes128::new(GenericArray::from_slice(&key));
         AesCtrFile {
@@ -34,10 +40,14 @@ impl AesCtrFile {
             ctr,
             len,
             cache: RefCell::new(LruCache::new(16)),
+            repeat_ctr,
         }
     }
 
-    fn get_pad(&self, block_index: usize) -> [u8; 16] {
+    fn get_pad(&self, mut block_index: usize) -> [u8; 16] {
+        if self.repeat_ctr {
+            block_index /= 0x20;
+        }
         let mut cache = self.cache.borrow_mut();
         if let Some(cached) = cache.get(&block_index) {
             *cached
@@ -137,7 +147,8 @@ mod test {
             ));
             let key: [u8; 16] = rng.gen();
             let ctr: [u8; 16] = rng.gen();
-            let mut aes_ctr_file = AesCtrFile::new(data.clone(), key, ctr);
+            let repeat_ctr = rng.gen();
+            let mut aes_ctr_file = AesCtrFile::new(data.clone(), key, ctr, repeat_ctr);
             let mut init: Vec<u8> = vec![0; len];
             aes_ctr_file.read(0, &mut init).unwrap();
             let plain = MemoryFile::new(init);
@@ -146,7 +157,7 @@ mod test {
                 &mut aes_ctr_file,
                 |aes_ctr_file| aes_ctr_file,
                 |aes_ctr_file| aes_ctr_file.commit().unwrap(),
-                || AesCtrFile::new(data.clone(), key, ctr),
+                || AesCtrFile::new(data.clone(), key, ctr, repeat_ctr),
                 &plain,
                 len,
             );

@@ -1,3 +1,4 @@
+use crate::byte_struct_common::*;
 use crate::error::*;
 use crate::random_access_file::*;
 use byte_struct::*;
@@ -49,12 +50,6 @@ pub struct FsInfo {
     pub file_table: OffsetOrFatFile,
     pub max_file: u32,
     pub p5: u32,
-}
-
-#[derive(ByteStruct)]
-#[byte_struct_le]
-struct U32le {
-    v: u32,
 }
 
 struct RefTicket<KeyType, InfoType> {

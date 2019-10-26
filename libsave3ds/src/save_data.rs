@@ -72,6 +72,15 @@ impl Signer for SdSaveSigner {
     }
 }
 
+pub struct CartSaveSigner {}
+impl Signer for CartSaveSigner {
+    fn block(&self, data: Vec<u8>) -> Vec<u8> {
+        let mut result = Vec::from(&b"CTR-NOR0"[..]);
+        result.append(&mut CtrSav0Signer {}.hash(data));
+        result
+    }
+}
+
 #[derive(ByteStruct)]
 #[byte_struct_le]
 struct SaveHeader {
@@ -99,6 +108,7 @@ pub struct SaveData {
 pub enum SaveDataType {
     Nand([u8; 16], u32),
     Sd([u8; 16], u64),
+    Cart([u8; 16]),
     Bare,
 }
 
@@ -259,6 +269,7 @@ impl SaveData {
             SaveDataType::Bare => None,
             SaveDataType::Nand(key, id) => Some((Box::new(NandSaveSigner { id }), key)),
             SaveDataType::Sd(key, id) => Some((Box::new(SdSaveSigner { id }), key)),
+            SaveDataType::Cart(key) => Some((Box::new(CartSaveSigner {}), key)),
         }
     }
 

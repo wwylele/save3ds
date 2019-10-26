@@ -60,7 +60,7 @@ impl SdNandFileSystem for Sd {
             *c = hash[i] ^ hash[i + 16];
         }
 
-        Ok(Rc::new(AesCtrFile::new(file, self.key, ctr)))
+        Ok(Rc::new(AesCtrFile::new(file, self.key, ctr, false)))
     }
 
     fn create(&self, path: &[&str], len: usize) -> Result<(), Error> {
