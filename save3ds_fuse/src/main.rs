@@ -1454,6 +1454,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             mountpoint,
         )?
     } else if let Some(cart) = cart_path {
+        // TODO: allow write
+        if !read_only {
+            println!("Writing to cart save is not implemented yet!");
+            return Ok(());
+        }
         start(
             resource.open_cart_save(&cart, !read_only)?,
             operation,

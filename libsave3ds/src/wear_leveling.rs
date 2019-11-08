@@ -174,7 +174,6 @@ impl WearLeveling {
 
         let mut unknown_header = vec![0; 8];
         parent.read(0, &mut unknown_header)?;
-        println!("wear leveling header: {:?}", unknown_header);
 
         let block_map = Rc::new(SubFile::new(
             parent.clone(),
@@ -275,6 +274,10 @@ impl WearLeveling {
             blocks[virtual_block].crc_ticket = Some(Rc::new(SubFile::new(Rc::new(journal), 6, 8)?));
         }
 
+        if blocks.last().unwrap().crc_ticket.is_some() {
+            return Err(Error::InvalidValue);
+        }
+
         let mut final_blocks = vec![];
         for block in blocks {
             let data = if let Some(crc_ticket) = &block.crc_ticket {
@@ -339,7 +342,8 @@ impl RandomAccessFile for WearLeveling {
         unimplemented!()
     }
     fn len(&self) -> usize {
-        self.blocks.len() * 0x1000
+        // -1 for the reserved block
+        (self.blocks.len() - 1) * 0x1000
     }
     fn commit(&self) -> Result<(), Error> {
         unimplemented!()

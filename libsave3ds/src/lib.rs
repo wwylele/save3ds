@@ -495,6 +495,7 @@ impl Resource {
         let mut repeat_ctr = false;
         match crypto_version {
             0 => {
+                // TODO: version 0 is unverified yet
                 let mut key_y_block = vec![];
                 key_y_block.extend_from_slice(&exheader_signature);
                 key_y_block.extend_from_slice(&self.cart_id_short.ok_or(Error::Missing)?);
@@ -511,6 +512,7 @@ impl Resource {
                 let hash = hasher.result();
 
                 key_y[..].copy_from_slice(&hash[0..16]);
+                // TODO: is there case where repeat_ctr = true for version 2?
             }
             6 => {
                 let mut key_y_block = vec![];
@@ -534,7 +536,7 @@ impl Resource {
                 cmac.input(&hash);
                 key_y[..].copy_from_slice(cmac.result().code().as_slice());
             }
-
+            // TODO: version 9
             _ => return Err(Error::Unsupported),
         }
 
