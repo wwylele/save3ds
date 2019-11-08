@@ -14,7 +14,7 @@ Note that the supported NAND format is in unpacked cleartext filesystem. If you 
 
 TODO:
  - Cartridge save data support
- 
+
 ## Build
 
 
@@ -24,7 +24,7 @@ TODO:
    - CentOS: `sudo yum install fuse-devel pkgconfig`
    - macOS: `brew cask install osxfuse && brew install pkg-config`
    - FreeBSD: `pkg install fusefs-libs pkgconf`
- 2. 
+ 2.
  ```
  cargo build
  ```
@@ -74,6 +74,7 @@ You can put options in arbitrary order. The detail description of them are:
    - with additional flag `--readonly`, the program opens the archive in read-only mode, prevents any modification operation and skips the saving at the end.
  - extract mode (`--extract`). Extracts all content of the archive to `MOUNT_PATH`.
  - import mode (`--import`). Clear the content of the archive, and import the content from `MOUNT_PATH`.
+ - touch mode (`--touch`). Just open and close the archive. Useful for testing the correctness of other specified resources. No need to specify `MOUNT_PATH` in this mode.
 
 `RESOURCE_PATHS` contains multiple supporting directories/files. Different archive types require different portion of them. It can contain any of the following:
  - `--nand DIR`: NAND root path, required by all archive types except `--bare`. However, if `--movable` is provided, this can be omitted for SD-related archives (`--db sdtitle|sdimport`, `--sdsave` and `--sdext`).

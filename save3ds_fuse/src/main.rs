@@ -23,6 +23,7 @@ enum FileSystemOperation {
     Mount(bool),
     Extract,
     Import,
+    Touch,
 }
 
 fn is_legal_char(c: u8) -> bool {
@@ -262,6 +263,7 @@ where
         FileSystemOperation::Mount(read_only) => do_mount(save, read_only, mountpoint)?,
         FileSystemOperation::Extract => extract(save, mountpoint)?,
         FileSystemOperation::Import => import(save, mountpoint)?,
+        FileSystemOperation::Touch => println!("Touched"),
     }
 
     Ok(())
@@ -1226,6 +1228,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     opts.optopt("", "sd", "SD root path", "DIR");
     opts.optopt("", "sdext", "mount the SD Extdata with the ID", "ID");
     opts.optopt("", "sdsave", "mount the SD save with the ID", "ID");
+    opts.optflag("t", "touch", "just try opening and closing the archive");
 
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
@@ -1241,12 +1244,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    if matches.free.len() != 1 {
+    let touch = matches.opt_present("touch");
+    let import = matches.opt_present("import");
+    let extract = matches.opt_present("extract");
+
+    if touch as i32 + import as i32 + extract as i32 > 1 {
+        println!(
+            "At most one of the following can be specified:
+    --extract, --import, --touch "
+        );
+        return Ok(());
+    }
+
+    let read_only = matches.opt_present("r") || import || touch;
+
+    let operation = if extract {
+        FileSystemOperation::Extract
+    } else if import {
+        FileSystemOperation::Import
+    } else if touch {
+        FileSystemOperation::Touch
+    } else {
+        FileSystemOperation::Mount(read_only)
+    };
+
+    if matches.free.len() != 1 && !touch {
         println!("Please specify one mount path");
         return Ok(());
     }
 
-    let mountpoint = std::path::Path::new(&matches.free[0]);
+    let mountpoint = if touch {
+        std::path::Path::new("dummy")
+    } else {
+        std::path::Path::new(&matches.free[0])
+    };
 
     let boot9_path = matches.opt_str("boot9");
     let movable_path = matches.opt_str("movable");
@@ -1300,20 +1331,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             })
             .collect()
     });
-
-    let read_only = matches.opt_present("r") || matches.opt_present("extract");
-
-    let operation = if matches.opt_present("extract") {
-        if matches.opt_present("import") {
-            println!("--extract and --import at the same time not allowed");
-            return Ok(());
-        }
-        FileSystemOperation::Extract
-    } else if matches.opt_present("import") {
-        FileSystemOperation::Import
-    } else {
-        FileSystemOperation::Mount(read_only)
-    };
 
     if [
         &sd_save_id,
