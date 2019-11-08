@@ -13,7 +13,7 @@ Both the library and the program currently supports the following operations:
 Note that the supported NAND format is in unpacked cleartext filesystem. If you want to read/write on the original NAND FAT image, you need to use other tools to extract the NAND data, or map another layer of virtual filesystem (e.g. https://github.com/ihaveamac/ninfs)
 
 TODO:
- - Cartridge save data support
+ - Complete cartridge save data support
 
 ## Build
 
@@ -66,6 +66,7 @@ You can put options in arbitrary order. The detail description of them are:
    - `sdtitle` refers to the file `SDMC:/Nintendo 3DS/<ID0>/<ID1>/dbs/title.db`
    - `sdimport` refers to the file `SDMC:/Nintendo 3DS/<ID0>/<ID1>/dbs/import.db`
    - `ticket` refers to the file `NAND:/dbs/ticket.db`
+ - `--cart FILE`: (experimental) a cartridge save data file with path `FILE`. Currently only support Card1, non-N3DS-exclusive, and read-only (needs `--readonly` for mounting).
 
 `MOUNT_PATH` is a directory to mount/extract/import the archive content
 
@@ -82,6 +83,9 @@ You can put options in arbitrary order. The detail description of them are:
  - `--boot9 FILE`: the `boot9.bin` file dumped from 3DS, required by all archive types except `--bare`
  - `--otp FILE`: the `otp.bin` file dumped from 3DS, required by `--db nandtitle|nandimport|ticket`
  - `--movable FILE`: the `movable.sed` file dumped from 3DS, optionally required by SD-related archives , if `--nand` is not provided.
+ - `--game FILE`: the game dumped from the cartridge in CCI format, required by cartridge save
+ - `--priv FILE`: the private header dumped from the cartrdige, required by cartridge save
+ - `--key FILE|HEX`: AES slot 0x2F key Y for decrypting v6.0 cartridge save
 
 `FORMAT_PARAM` is an optional group of options in the form of `--format param1:value1,param2:value2,...`, used in conjuntion with mount mode or import mode. When the flag `--format` presents, the archive will be formatted using the given parameters before mounting/importing. This is useful for creating a completely new archives. If an archive already exists in the place, it will be deleted. The difference between `--import` and `--import --format` is that, although both clearing the content, `--import` retains the archive layout and capacity that depends on the formatting parameters, while the addition `--format` flag can change the layout and capacity.
 
