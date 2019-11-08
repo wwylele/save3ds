@@ -9,7 +9,7 @@ rust:
   - stable
 install:
   - if [ "$TRAVIS_OS_NAME" == "linux" ]; then sudo apt-get update && sudo apt-get install -y libfuse-dev; fi
-  - if [ "$TRAVIS_OS_NAME" == "osx" ]; then brew update && brew tap caskroom/cask && brew cask install osxfuse; fi
+  - if [ "$TRAVIS_OS_NAME" == "osx" ]; then brew update && brew tap homebrew/homebrew-cask && brew cask install osxfuse; fi
 script:
   - cargo build -v
   - cargo test -v
