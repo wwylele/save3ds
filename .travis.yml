@@ -1,19 +1,29 @@
-
 language: rust
 cache: cargo
 os:
-  - linux
-  - osx
-  - windows
+- linux
+- osx
+- windows
 rust:
-  - stable
+- stable
 install:
-  - if [ "$TRAVIS_OS_NAME" == "linux" ]; then sudo apt-get update && sudo apt-get install -y libfuse-dev; fi
-  - if [ "$TRAVIS_OS_NAME" == "osx" ]; then brew update && brew tap homebrew/homebrew-cask && brew cask install osxfuse; fi
+- if [ "$TRAVIS_OS_NAME" == "linux" ]; then sudo apt-get update && sudo apt-get install
+  -y libfuse-dev; fi
+- if [ "$TRAVIS_OS_NAME" == "osx" ]; then brew update && brew tap homebrew/homebrew-cask
+  && brew cask install osxfuse; fi
 script:
-  - cargo build -v
-  - cargo test -v
-
+- cargo build -v --release
+- cargo test -v --release
 env:
   global:
-    - RUST_BACKTRACE=1
+  - RUST_BACKTRACE=1
+deploy:
+  provider: releases
+  api_key:
+    secure: Y48k+xvAqPq2+TzNShZJabvct9S5YbT8nTSa418dx2C9cqvDE7X73UClXyeq0qBBTRDsXzc1T6zQZnfBKeaRiRG1Bu3fFOvjzlZYNLTzybzxott4UQMbZQLvzLsBkwslDreGu40hTJi6U/c5kuuZKrJge4/xFyXAjgS9WkQevaj0C/PA4CWG1rgCvhWGPMqBO2IZAX4VuIr1uRMwm3TPCUpdMgasqBCHiGJ9CFncrFnwDzHmjidFntJAQzPdeII/y7VyBXRKiyY6m5T0pg072ITdKXTck1I4m92JhWCGS426C5H4W5MPr7bIOY5f+RqYrQBhTO/WU4d/ALS4q3UdOjhf3x8d/KqKI9XQ8kqP8M4/BYIvrRj+bD8p6vlTSUR4ARH8B1EJlfj0VVVrsJC9+dauWwpExQwG41I81DlhpyNFMfEn/KvvMxBW7tGBi06DmmWYLmlLLOggqJQA8mjso/OP33pBf5ceO+qw+eTkcqf2NCPcl2j8Sy1m7bjU4NV51TWElwFohtYAKVgv9GhkK2OojNVsLOMKK95zje/ZmZ9UHUppInvTdlh9PteeMBhlujZKsGX0DlZYdwiDivyt39SFam4+s8D8Xz0Jdh/8HIHXwoQMkAZsXQYtxf3Q7UXHFSr1jLmWcfAg4UTCNbr4dyRfHDxRytTAN9+2bb4/uTY=
+  file_glob: true
+  file: target/release/save3ds_fuse*
+  skip_cleanup: true
+  on:
+    tags: true
+    repo: wwylele/save3ds
