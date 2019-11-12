@@ -1256,7 +1256,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let read_only = matches.opt_present("r") || import || touch;
+    let read_only = matches.opt_present("r") || extract || touch;
 
     let operation = if extract {
         FileSystemOperation::Extract
