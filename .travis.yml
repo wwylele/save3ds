@@ -19,11 +19,13 @@ env:
   - RUST_BACKTRACE=1
 before_deploy:
   - mkdir deploy
+  - cd target/release/
+  - export ZIP_NAME=../../deploy/save3ds-$TRAVIS_TAG-$TRAVIS_COMMIT-$TRAVIS_OS_NAME.zip
   - if [ "$TRAVIS_OS_NAME" == "windows" ];
-    then export EXECUTABLE_NAME=save3ds_fuse.exe;
-    else export EXECUTABLE_NAME=save3ds_fuse;
+    then 7z a $ZIP_NAME save3ds_fuse.exe
+    else zip $ZIP_NAME save3ds_fuse
     fi
-  - zip deploy/save3ds-$TRAVIS_TAG-$TRAVIS_COMMIT-$TRAVIS_OS_NAME.zip target/release/$EXECUTABLE_NAME
+  - cd ../..
 deploy:
   provider: releases
   api_key:
