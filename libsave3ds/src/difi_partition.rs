@@ -474,7 +474,7 @@ mod test {
         use rand::distributions::Standard;
         use rand::prelude::*;
 
-        let mut rng = rand::thread_rng();
+        let rng = rand::thread_rng();
         for _ in 0..10 {
             let param = DifiPartitionParam::random();
             let len = param.data_len;

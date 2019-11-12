@@ -314,7 +314,7 @@ mod test {
         partition_index: usize,
         signer: Option<(Box<SimpleSigner>, [u8; 16])>,
     ) {
-        let mut rng = rand::thread_rng();
+        let rng = rand::thread_rng();
         let mut disa = Disa::new(
             raw_file.clone(),
             signer
