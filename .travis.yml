@@ -19,7 +19,10 @@ env:
   - RUST_BACKTRACE=1
 before_deploy:
   - mkdir deploy
-  - if [ "$TRAVIS_OS_NAME" == "windows" ]; then export EXECUTABLE_NAME=save3ds_fuse.exe else then export EXECUTABLE_NAME=save3ds_fuse
+  - if [ "$TRAVIS_OS_NAME" == "windows" ];
+    then export EXECUTABLE_NAME=save3ds_fuse.exe;
+    else export EXECUTABLE_NAME=save3ds_fuse;
+    fi
   - zip deploy/save3ds-$TRAVIS_TAG-$TRAVIS_COMMIT-$TRAVIS_OS_NAME.zip target/release/$EXECUTABLE_NAME
 deploy:
   provider: releases
