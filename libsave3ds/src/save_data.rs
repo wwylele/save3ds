@@ -341,8 +341,8 @@ impl SaveData {
                 file_table,
                 param.max_file + 1,
             )?;
-            let dir_table_combo = OffsetOrFatFile::from_offset(info.dir_table_offset.unwrap());
-            let file_table_combo = OffsetOrFatFile::from_offset(info.file_table_offset.unwrap());
+            let dir_table_combo = OffsetOrFatFile::from_offset(info.dir_table_offset.unwrap() as u64);
+            let file_table_combo = OffsetOrFatFile::from_offset(info.file_table_offset.unwrap() as u64);
             (dir_table_combo, file_table_combo)
         } else {
             let fat = Fat::new(fat_table, data, info.block_len)?;
@@ -455,7 +455,7 @@ impl SaveData {
         let dir_table: Rc<dyn RandomAccessFile> = if disa.partition_count() == 2 {
             Rc::new(SubFile::new(
                 disa[0].clone(),
-                fs_info.dir_table.to_offset(),
+                fs_info.dir_table.to_offset() as usize,
                 (fs_info.max_dir + 2) as usize * (SaveExtKey::BYTE_LEN + SaveExtDir::BYTE_LEN + 4),
             )?)
         } else {
@@ -466,7 +466,7 @@ impl SaveData {
         let file_table: Rc<dyn RandomAccessFile> = if disa.partition_count() == 2 {
             Rc::new(SubFile::new(
                 disa[0].clone(),
-                fs_info.file_table.to_offset(),
+                fs_info.file_table.to_offset() as usize,
                 (fs_info.max_file + 1) as usize * (SaveExtKey::BYTE_LEN + SaveFile::BYTE_LEN + 4),
             )?)
         } else {

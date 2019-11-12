@@ -15,15 +15,15 @@ pub struct OffsetOrFatFile {
 }
 
 impl OffsetOrFatFile {
-    pub fn from_offset(offset: usize) -> OffsetOrFatFile {
+    pub fn from_offset(offset: u64) -> OffsetOrFatFile {
         OffsetOrFatFile {
             block_index: (offset & 0xFFFF_FFFF) as u32,
             block_count: (offset >> 32) as u32,
         }
     }
 
-    pub fn to_offset(&self) -> usize {
-        self.block_index as usize | ((self.block_count as usize) << 32)
+    pub fn to_offset(&self) -> u64 {
+        self.block_index as u64 | ((self.block_count as u64) << 32)
     }
 }
 
