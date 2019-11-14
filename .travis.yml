@@ -19,11 +19,12 @@ env:
   - RUST_BACKTRACE=1
 before_deploy:
   - mkdir deploy
+  - cp README.md LICENSE-APACHE LICENSE-MIT target/release
   - cd target/release/
   - export ZIP_NAME=../../deploy/save3ds-$TRAVIS_TAG-$TRAVIS_COMMIT-$TRAVIS_OS_NAME.zip
   - if [ "$TRAVIS_OS_NAME" == "windows" ];
-    then 7z a $ZIP_NAME save3ds_fuse.exe;
-    else zip $ZIP_NAME save3ds_fuse;
+    then 7z a $ZIP_NAME save3ds_fuse.exe README.md LICENSE-APACHE LICENSE-MIT;
+    else zip $ZIP_NAME save3ds_fuse README.md LICENSE-APACHE LICENSE-MIT;
     fi
   - cd ../..
 deploy:
