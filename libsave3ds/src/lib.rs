@@ -152,8 +152,8 @@ impl Resource {
         };
 
         let key_x_db = if let Some(otp_path) = otp_path {
-            let key_otp = key_otp.ok_or(Error::Missing)?;
-            let mut iv_otp = iv_otp.ok_or(Error::Missing)?;
+            let key_otp = key_otp.ok_or(Error::MissingBoot9)?;
+            let mut iv_otp = iv_otp.ok_or(Error::MissingBoot9)?;
             let mut otp_file = std::fs::File::open(otp_path)?;
             let mut otp = [0; 0x100];
             otp_file.read_exact(&mut otp)?;
@@ -174,7 +174,8 @@ impl Resource {
                 return make_error(Error::BrokenOtp);
             }
 
-            let (otp_salt, mut otp_salt_iv, mut otp_salt_block) = otp_salt.ok_or(Error::Missing)?;
+            let (otp_salt, mut otp_salt_iv, mut otp_salt_block) =
+                otp_salt.ok_or(Error::MissingBoot9)?;
             let mut hasher = Sha256::new();
             hasher.input(&otp[0x90..0xAC]);
             hasher.input(&otp_salt[..]);
@@ -221,10 +222,10 @@ impl Resource {
 
     pub fn format_sd_ext(&self, id: u64, param: &ExtDataFormatParam) -> Result<(), Error> {
         ExtData::format(
-            self.sd.as_ref().ok_or(Error::Missing)?.as_ref(),
+            self.sd.as_ref().ok_or(Error::MissingSd)?.as_ref(),
             &["extdata"],
             id,
-            self.key_sign.ok_or(Error::Missing)?,
+            self.key_sign.ok_or(Error::MissingBoot9)?,
             None,
             param,
         )
@@ -232,10 +233,10 @@ impl Resource {
 
     pub fn open_sd_ext(&self, id: u64, write: bool) -> Result<ExtData, Error> {
         ExtData::new(
-            self.sd.as_ref().ok_or(Error::Missing)?.clone(),
+            self.sd.as_ref().ok_or(Error::MissingSd)?.clone(),
             &["extdata"],
             id,
-            self.key_sign.ok_or(Error::Missing)?,
+            self.key_sign.ok_or(Error::MissingBoot9)?,
             false,
             write,
         )
@@ -256,13 +257,13 @@ impl Resource {
         let id_low = format!("{:08x}", id & 0xFFFF_FFFF);
         let sub_path = ["title", &id_high, &id_low, "data", "00000001.sav"];
 
-        let sd = self.sd.as_ref().ok_or(Error::Missing)?;
+        let sd = self.sd.as_ref().ok_or(Error::MissingSd)?;
         sd.create(&sub_path, len)?;
         let file = sd.open(&sub_path, true)?;
 
         SaveData::format(
             file,
-            SaveDataType::Sd(self.key_sign.ok_or(Error::Missing)?, id),
+            SaveDataType::Sd(self.key_sign.ok_or(Error::MissingBoot9)?, id),
             &param,
             block_count,
         )?;
@@ -278,12 +279,12 @@ impl Resource {
         let dec_file = self
             .sd
             .as_ref()
-            .ok_or(Error::Missing)?
+            .ok_or(Error::MissingSd)?
             .open(&sub_path, write)?;
 
         SaveData::new(
             dec_file,
-            SaveDataType::Sd(self.key_sign.ok_or(Error::Missing)?, id),
+            SaveDataType::Sd(self.key_sign.ok_or(Error::MissingBoot9)?, id),
         )
     }
 
@@ -300,19 +301,19 @@ impl Resource {
 
         let sub_path = [
             "data",
-            self.id0.as_ref().ok_or(Error::Missing)?,
+            self.id0.as_ref().ok_or(Error::MissingNand)?,
             "sysdata",
             &format!("{:08x}", id),
             "00000000",
         ];
 
-        let nand = self.nand.as_ref().ok_or(Error::Missing)?;
+        let nand = self.nand.as_ref().ok_or(Error::MissingNand)?;
         nand.create(&sub_path, len)?;
         let file = nand.open(&sub_path, true)?;
 
         SaveData::format(
             file,
-            SaveDataType::Nand(self.key_sign.ok_or(Error::Missing)?, id),
+            SaveDataType::Nand(self.key_sign.ok_or(Error::MissingBoot9)?, id),
             &param,
             block_count,
         )?;
@@ -321,10 +322,10 @@ impl Resource {
     }
 
     pub fn open_nand_save(&self, id: u32, write: bool) -> Result<SaveData, Error> {
-        let file = self.nand.as_ref().ok_or(Error::Missing)?.open(
+        let file = self.nand.as_ref().ok_or(Error::MissingNand)?.open(
             &[
                 "data",
-                self.id0.as_ref().ok_or(Error::Missing)?,
+                self.id0.as_ref().ok_or(Error::MissingNand)?,
                 "sysdata",
                 &format!("{:08x}", id),
                 "00000000",
@@ -333,16 +334,20 @@ impl Resource {
         )?;
         SaveData::new(
             file,
-            SaveDataType::Nand(self.key_sign.ok_or(Error::Missing)?, id),
+            SaveDataType::Nand(self.key_sign.ok_or(Error::MissingBoot9)?, id),
         )
     }
 
     pub fn format_nand_ext(&self, id: u64, param: &ExtDataFormatParam) -> Result<(), Error> {
         ExtData::format(
-            self.nand.as_ref().ok_or(Error::Missing)?.as_ref(),
-            &["data", self.id0.as_ref().ok_or(Error::Missing)?, "extdata"],
+            self.nand.as_ref().ok_or(Error::MissingNand)?.as_ref(),
+            &[
+                "data",
+                self.id0.as_ref().ok_or(Error::MissingNand)?,
+                "extdata",
+            ],
             id,
-            self.key_sign.ok_or(Error::Missing)?,
+            self.key_sign.ok_or(Error::MissingBoot9)?,
             Some(1024 * 1024),
             param,
         )
@@ -350,10 +355,14 @@ impl Resource {
 
     pub fn open_nand_ext(&self, id: u64, write: bool) -> Result<ExtData, Error> {
         ExtData::new(
-            self.nand.as_ref().ok_or(Error::Missing)?.clone(),
-            &["data", self.id0.as_ref().ok_or(Error::Missing)?, "extdata"],
+            self.nand.as_ref().ok_or(Error::MissingNand)?.clone(),
+            &[
+                "data",
+                self.id0.as_ref().ok_or(Error::MissingNand)?,
+                "extdata",
+            ],
             id,
-            self.key_sign.ok_or(Error::Missing)?,
+            self.key_sign.ok_or(Error::MissingBoot9)?,
             true,
             write,
         )
@@ -397,7 +406,7 @@ impl Resource {
 
     pub fn get_cart_save_key_y(&self) -> Result<([u8; 16], bool), Error> {
         let game = disk_file::DiskFile::new(std::fs::File::open(
-            self.game_path.as_ref().ok_or(Error::Missing)?,
+            self.game_path.as_ref().ok_or(Error::MissingGame)?,
         )?)?;
 
         use byte_struct_common::*;
@@ -422,7 +431,8 @@ impl Resource {
 
         let mut key_y_ncch = [0; 16];
         cxi.read(0, &mut key_y_ncch)?;
-        let ncch_key = key_engine::scramble(self.key_x_ncch.ok_or(Error::Missing)?, key_y_ncch);
+        let ncch_key =
+            key_engine::scramble(self.key_x_ncch.ok_or(Error::MissingBoot9)?, key_y_ncch);
 
         let ncch_version = read_struct::<U16le>(&cxi, 0x112)?.v;
         let exefs_offset = read_struct::<U32le>(&cxi, 0x1A0)?.v * 0x200;
@@ -498,14 +508,14 @@ impl Resource {
                 // TODO: version 0 is unverified yet
                 let mut key_y_block = vec![];
                 key_y_block.extend_from_slice(&exheader_signature);
-                key_y_block.extend_from_slice(&self.cart_id_short.ok_or(Error::Missing)?);
+                key_y_block.extend_from_slice(&self.cart_id_short.ok_or(Error::MissingPriv)?);
                 key_y[..].copy_from_slice(&key_y_block[..]);
                 repeat_ctr = true;
             }
             2 => {
                 let mut key_y_block = vec![];
                 key_y_block.extend_from_slice(&exheader_signature);
-                key_y_block.extend_from_slice(&self.cart_id_long.ok_or(Error::Missing)?);
+                key_y_block.extend_from_slice(&self.cart_id_long.ok_or(Error::MissingPriv)?);
 
                 let mut hasher = Sha256::new();
                 hasher.input(&key_y_block[..]);
@@ -517,7 +527,7 @@ impl Resource {
             6 => {
                 let mut key_y_block = vec![];
                 key_y_block.extend_from_slice(&exheader_signature);
-                key_y_block.extend_from_slice(&self.cart_id_long.ok_or(Error::Missing)?);
+                key_y_block.extend_from_slice(&self.cart_id_long.ok_or(Error::MissingPriv)?);
                 key_y_block.extend_from_slice(&program_id);
                 key_y_block.extend_from_slice(&exefs_hash);
 
@@ -527,8 +537,8 @@ impl Resource {
 
                 // Yup this one use the same key x as ncch
                 let cmac_key = key_engine::scramble(
-                    self.key_x_ncch.ok_or(Error::Missing)?,
-                    self.x2f_key_y.ok_or(Error::Missing)?,
+                    self.key_x_ncch.ok_or(Error::MissingBoot9)?,
+                    self.x2f_key_y.ok_or(Error::MissingKeyY2F)?,
                 );
 
                 use cmac::*;
@@ -554,8 +564,8 @@ impl Resource {
         let save = wear_leveling::WearLeveling::new(file)?;
 
         let (key_y, repeat_ctr) = self.get_cart_save_key_y()?;
-        let key = key_engine::scramble(self.key_x_dec.ok_or(Error::Missing)?, key_y);
-        let key_cmac = key_engine::scramble(self.key_x_sign.ok_or(Error::Missing)?, key_y);
+        let key = key_engine::scramble(self.key_x_dec.ok_or(Error::MissingBoot9)?, key_y);
+        let key_cmac = key_engine::scramble(self.key_x_sign.ok_or(Error::MissingBoot9)?, key_y);
 
         let save = Rc::new(aes_ctr_file::AesCtrFile::new(
             Rc::new(save),
@@ -572,51 +582,51 @@ impl Resource {
             DbType::NandTitle => (
                 self.nand
                     .as_ref()
-                    .ok_or(Error::Missing)?
+                    .ok_or(Error::MissingNand)?
                     .open(&["dbs", "title.db"], write)?,
-                self.key_db.ok_or(Error::Missing)?,
+                self.key_db.ok_or(Error::MissingOtp)?,
             ),
             DbType::NandImport => (
                 self.nand
                     .as_ref()
-                    .ok_or(Error::Missing)?
+                    .ok_or(Error::MissingNand)?
                     .open(&["dbs", "import.db"], write)?,
-                self.key_db.ok_or(Error::Missing)?,
+                self.key_db.ok_or(Error::MissingOtp)?,
             ),
             DbType::TmpTitle => (
                 self.nand
                     .as_ref()
-                    .ok_or(Error::Missing)?
+                    .ok_or(Error::MissingNand)?
                     .open(&["dbs", "tmp_t.db"], write)?,
-                self.key_db.ok_or(Error::Missing)?,
+                self.key_db.ok_or(Error::MissingOtp)?,
             ),
             DbType::TmpImport => (
                 self.nand
                     .as_ref()
-                    .ok_or(Error::Missing)?
+                    .ok_or(Error::MissingNand)?
                     .open(&["dbs", "tmp_i.db"], write)?,
-                self.key_db.ok_or(Error::Missing)?,
+                self.key_db.ok_or(Error::MissingOtp)?,
             ),
             DbType::Ticket => (
                 self.nand
                     .as_ref()
-                    .ok_or(Error::Missing)?
+                    .ok_or(Error::MissingNand)?
                     .open(&["dbs", "ticket.db"], write)?,
-                self.key_db.ok_or(Error::Missing)?,
+                self.key_db.ok_or(Error::MissingOtp)?,
             ),
             DbType::SdTitle => (
                 self.sd
                     .as_ref()
-                    .ok_or(Error::Missing)?
+                    .ok_or(Error::MissingSd)?
                     .open(&["dbs", "title.db"], write)?,
-                self.key_sign.ok_or(Error::Missing)?,
+                self.key_sign.ok_or(Error::MissingSd)?,
             ),
             DbType::SdImport => (
                 self.sd
                     .as_ref()
-                    .ok_or(Error::Missing)?
+                    .ok_or(Error::MissingSd)?
                     .open(&["dbs", "import.db"], write)?,
-                self.key_sign.ok_or(Error::Missing)?,
+                self.key_sign.ok_or(Error::MissingSd)?,
             ),
         };
 

@@ -26,7 +26,7 @@ impl Sd {
                 .map(|a| a.file_type().map(|a| a.is_dir()).unwrap_or(false))
                 .unwrap_or(false)
         })
-        .ok_or(Error::Missing)??
+        .ok_or(Error::BrokenSd)??
         .path();
         let key = scramble(key_x, key_y);
         Ok(Sd { path, key })
