@@ -1187,7 +1187,7 @@ fn to_save_data_format_param(
     ))
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     let program = args[0].clone();
 
@@ -1468,6 +1468,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         panic!()
     };
     Ok(())
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let result = main_inner();
+    if let Err(e) = &result {
+        println!("{}", e);
+    }
+    result
 }
 
 #[cfg(test)]
