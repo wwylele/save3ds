@@ -12,6 +12,14 @@ impl MemoryFile {
             data: RefCell::new(data),
         }
     }
+
+    pub fn from_file(file: &dyn RandomAccessFile) -> Result<MemoryFile, Error> {
+        let mut data = vec![0; file.len()];
+        file.read(0, &mut data)?;
+        Ok(MemoryFile {
+            data: RefCell::new(data),
+        })
+    }
 }
 
 impl RandomAccessFile for MemoryFile {

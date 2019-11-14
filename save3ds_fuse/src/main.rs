@@ -1194,7 +1194,7 @@ fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
     let mut opts = Options::new();
     opts.optopt("", "bare", "mount a bare DISA file", "FILE");
     opts.optopt("b", "boot9", "boot9.bin file path", "FILE");
-    opts.optopt("c", "cart", "mount a cartridge save", "FILE");
+    opts.optopt("c", "cart", "(experimental) mount a cartridge save", "FILE");
     opts.optopt(
         "",
         "db",
@@ -1434,6 +1434,9 @@ fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
             mountpoint,
         )?
     } else if let Some(db_type) = db_type {
+        if format_param.is_some() {
+            println!("Warning: formatting not supported");
+        }
         let db_type = match db_type.as_ref() {
             "nandtitle" => DbType::NandTitle,
             "nandimport" => DbType::NandImport,
@@ -1454,10 +1457,8 @@ fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
             mountpoint,
         )?
     } else if let Some(cart) = cart_path {
-        // TODO: allow write
-        if !read_only {
-            println!("Writing to cart save is not implemented yet!");
-            return Ok(());
+        if format_param.is_some() {
+            println!("Warning: formatting not supported");
         }
         start(
             resource.open_cart_save(&cart, !read_only)?,

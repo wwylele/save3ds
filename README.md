@@ -100,7 +100,7 @@ If you want leave all parameters in default values, you can specify an empty opt
 
 These parameters behave the same as those in the `fs:USER` 3DS service functions: `FormatSaveData`, `CreateSystemSaveData` and `CreateExtSaveData`. However, the `max_dir`/`max_file` specified here is two/one larger than the one in `CreateExtSaveData`, as the latter one automatically counts the required `/user`, `/boss` and `/icon`.
 
-Title database files currently doesn't support `--format`.
+Title database files and cartridge save currently don't support `--format`.
 
 ## Example command
 ```bash

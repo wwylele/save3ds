@@ -1,5 +1,6 @@
 mod aes_ctr_file;
 mod byte_struct_common;
+mod cart_save_data;
 pub mod db;
 mod diff;
 mod difi_partition;
@@ -29,6 +30,7 @@ mod wear_leveling;
 use aes::block_cipher_trait::generic_array::GenericArray;
 use aes::block_cipher_trait::*;
 use aes::*;
+use cart_save_data::*;
 use db::*;
 use disk_file::DiskFile;
 use error::*;
@@ -553,7 +555,7 @@ impl Resource {
         Ok((key_y, repeat_ctr))
     }
 
-    pub fn open_cart_save(&self, path: &str, write: bool) -> Result<SaveData, Error> {
+    pub fn open_cart_save(&self, path: &str, write: bool) -> Result<CartSaveData, Error> {
         let file = Rc::new(DiskFile::new(
             std::fs::OpenOptions::new()
                 .read(true)
@@ -561,20 +563,11 @@ impl Resource {
                 .open(path)?,
         )?);
 
-        let save = wear_leveling::WearLeveling::new(file)?;
-
         let (key_y, repeat_ctr) = self.get_cart_save_key_y()?;
         let key = key_engine::scramble(self.key_x_dec.ok_or(Error::MissingBoot9)?, key_y);
         let key_cmac = key_engine::scramble(self.key_x_sign.ok_or(Error::MissingBoot9)?, key_y);
 
-        let save = Rc::new(aes_ctr_file::AesCtrFile::new(
-            Rc::new(save),
-            key,
-            [0; 16],
-            repeat_ctr,
-        ));
-
-        SaveData::new(save, SaveDataType::Cart(key_cmac))
+        CartSaveData::new(file, key, key_cmac, repeat_ctr)
     }
 
     pub fn open_db(&self, db_type: DbType, write: bool) -> Result<Db, Error> {

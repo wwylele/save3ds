@@ -341,8 +341,10 @@ impl SaveData {
                 file_table,
                 param.max_file + 1,
             )?;
-            let dir_table_combo = OffsetOrFatFile::from_offset(info.dir_table_offset.unwrap() as u64);
-            let file_table_combo = OffsetOrFatFile::from_offset(info.file_table_offset.unwrap() as u64);
+            let dir_table_combo =
+                OffsetOrFatFile::from_offset(info.dir_table_offset.unwrap() as u64);
+            let file_table_combo =
+                OffsetOrFatFile::from_offset(info.file_table_offset.unwrap() as u64);
             (dir_table_combo, file_table_combo)
         } else {
             let fat = Fat::new(fat_table, data, info.block_len)?;

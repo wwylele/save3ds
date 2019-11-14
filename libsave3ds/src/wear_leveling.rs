@@ -1,8 +1,10 @@
 use crate::byte_struct_common::*;
 use crate::error::*;
+use crate::memory_file::*;
 use crate::misc::*;
 use crate::random_access_file::*;
 use crate::sub_file::SubFile;
+use std::cell::*;
 use std::collections::HashSet;
 use std::rc::Rc;
 
@@ -86,11 +88,11 @@ struct CrcFile<C, F> {
 }
 
 impl<C: CrcStub, F: RandomAccessFile> CrcFile<C, F> {
-    fn new(crc_stub: C, data: Rc<F>) -> Result<CrcFile<C, F>, Error> {
+    fn new(crc_stub: C, data: Rc<F>, initialized: bool) -> Result<CrcFile<C, F>, Error> {
         let len = data.len();
         let mut buf = vec![0; len];
         data.read(0, &mut buf)?;
-        if !crc_stub.verify(crc16_ninty(&buf))? {
+        if initialized && !crc_stub.verify(crc16_ninty(&buf))? {
             return Err(Error::SignatureMismatch);
         }
         Ok(CrcFile {
@@ -156,11 +158,18 @@ impl<F0: RandomAccessFile, F1: RandomAccessFile> RandomAccessFile for MirroredFi
 }
 
 struct WearLevelingBlock {
-    data: Option<Vec<CrcFile<XorCrcStub<SubFile>, SubFile>>>,
+    physical_block: u8,
+    allocate_count: u8,
+    initialized: bool,
+    dirty: bool,
+    crc_ticket: Rc<MemoryFile>,
+    data: Vec<CrcFile<XorCrcStub<SubFile>, SubFile>>,
 }
 
 pub struct WearLeveling {
-    blocks: Vec<WearLevelingBlock>,
+    block_map: Rc<CrcFile<SimpleCrcStub<SubFile>, SubFile>>,
+    journal_list: Rc<SubFile>,
+    blocks: RefCell<Vec<WearLevelingBlock>>,
 }
 
 impl WearLeveling {
@@ -172,9 +181,6 @@ impl WearLeveling {
         let physical_block_count = len / 0x1000;
         let virtual_block_count = physical_block_count - 1;
 
-        let mut unknown_header = vec![0; 8];
-        parent.read(0, &mut unknown_header)?;
-
         let block_map = Rc::new(SubFile::new(
             parent.clone(),
             0,
@@ -185,12 +191,17 @@ impl WearLeveling {
             8 + virtual_block_count * 10,
             2,
         )?);
-        let block_map = Rc::new(CrcFile::new(SimpleCrcStub::new(block_map_crc)?, block_map)?);
+        let block_map = Rc::new(CrcFile::new(
+            SimpleCrcStub::new(block_map_crc)?,
+            block_map,
+            true,
+        )?);
 
         struct Block {
             physical_block: u8,
             allocate_count: u8,
-            crc_ticket: Option<Rc<SubFile>>,
+            initialized: bool,
+            crc_ticket: MemoryFile,
         };
 
         let mut blocks = vec![];
@@ -198,14 +209,17 @@ impl WearLeveling {
             let offset = i * 10 + 8;
             let mut buf = [0; 2];
             block_map.read(offset, &mut buf)?;
+            let initialized = buf[0] & 0x80 != 0;
+            let crc_ticket = if initialized {
+                MemoryFile::from_file(&SubFile::new(block_map.clone(), offset + 2, 8)?)?
+            } else {
+                MemoryFile::new(vec![0; 8])
+            };
             blocks.push(Block {
                 physical_block: buf[0] & 0x7F,
                 allocate_count: buf[1],
-                crc_ticket: if buf[0] & 0x80 != 0 {
-                    Some(Rc::new(SubFile::new(block_map.clone(), offset + 2, 8)?))
-                } else {
-                    None
-                },
+                initialized,
+                crc_ticket,
             });
         }
 
@@ -216,9 +230,16 @@ impl WearLeveling {
             }
         }
 
-        for offset in (8 + virtual_block_count * 10 + 2..0x1000).step_by(0x20) {
-            let journal0 = Rc::new(SubFile::new(parent.clone(), offset, 14)?);
-            let journal1 = Rc::new(SubFile::new(parent.clone(), offset + 14, 14)?);
+        let journal_start = 10 + virtual_block_count * 10;
+        let journal_list = Rc::new(SubFile::new(
+            parent.clone(),
+            journal_start,
+            0x1000 - journal_start,
+        )?);
+
+        for offset in (0..journal_list.len()).step_by(0x20) {
+            let journal0 = Rc::new(SubFile::new(journal_list.clone(), offset, 14)?);
+            let journal1 = Rc::new(SubFile::new(journal_list.clone(), offset + 14, 14)?);
             let journal = MirroredFile::new(journal0, journal1)?;
             let mut buf = [0; 6];
             journal.read(0, &mut buf)?;
@@ -253,7 +274,7 @@ impl WearLeveling {
                 return Err(Error::InvalidValue);
             }
 
-            if blocks[virtual_block_prev].crc_ticket.is_some() {
+            if blocks[virtual_block_prev].initialized {
                 return Err(Error::InvalidValue);
             }
 
@@ -268,46 +289,53 @@ impl WearLeveling {
 
             blocks[virtual_block_prev].allocate_count = allocate_count_prev;
             blocks[virtual_block_prev].physical_block = physical_block_prev;
-            blocks[virtual_block_prev].crc_ticket = None;
+            blocks[virtual_block_prev].initialized = false;
+            blocks[virtual_block_prev].crc_ticket = MemoryFile::new(vec![0; 8]);
             blocks[virtual_block].allocate_count = allocate_count;
             blocks[virtual_block].physical_block = physical_block;
-            blocks[virtual_block].crc_ticket = Some(Rc::new(SubFile::new(Rc::new(journal), 6, 8)?));
+            blocks[virtual_block].initialized = true;
+            blocks[virtual_block].crc_ticket =
+                MemoryFile::from_file(&(SubFile::new(Rc::new(journal), 6, 8)?))?;
         }
 
-        if blocks.last().unwrap().crc_ticket.is_some() {
+        if blocks.last().unwrap().initialized {
             return Err(Error::InvalidValue);
         }
 
         let mut final_blocks = vec![];
         for block in blocks {
-            let data = if let Some(crc_ticket) = &block.crc_ticket {
-                let mut data_list = vec![];
-                for i in 0..8 {
-                    let offset = i * 0x200 + block.physical_block as usize * 0x1000;
-                    let data = Rc::new(SubFile::new(parent.clone(), offset, 0x200)?);
-                    let crc = Rc::new(SubFile::new(crc_ticket.clone(), i, 1)?);
-                    let data = CrcFile::new(XorCrcStub::new(crc)?, data)?;
-                    data_list.push(data);
-                }
-                Some(data_list)
-            } else {
-                None
-            };
-            final_blocks.push(WearLevelingBlock { data });
+            let mut data_list = vec![];
+            let crc_ticket = Rc::new(block.crc_ticket);
+            for i in 0..8 {
+                let offset = i * 0x200 + block.physical_block as usize * 0x1000;
+                let data = Rc::new(SubFile::new(parent.clone(), offset, 0x200)?);
+                let crc = Rc::new(SubFile::new(crc_ticket.clone(), i, 1)?);
+                let data = CrcFile::new(XorCrcStub::new(crc)?, data, block.initialized)?;
+                data_list.push(data);
+            }
+            final_blocks.push(WearLevelingBlock {
+                physical_block: block.physical_block,
+                allocate_count: block.allocate_count,
+                initialized: block.initialized,
+                dirty: false,
+                crc_ticket,
+                data: data_list,
+            });
         }
 
         Ok(WearLeveling {
-            blocks: final_blocks,
+            block_map,
+            journal_list,
+            blocks: RefCell::new(final_blocks),
         })
     }
 }
 
+const CHUNK_INIT: [u8; 0x200] = [0xFF; 0x200];
+
 impl RandomAccessFile for WearLeveling {
     fn read(&self, pos: usize, buf: &mut [u8]) -> Result<(), Error> {
         let end = pos + buf.len();
-        if end > self.len() {
-            return Err(Error::OutOfBound);
-        }
 
         // chunk index range the operation covers
         let begin_chunk = pos / 0x200;
@@ -322,10 +350,10 @@ impl RandomAccessFile for WearLeveling {
             let data_begin = std::cmp::max(data_begin_as_chunk, pos);
             let data_end = std::cmp::min(data_end_as_chunk, end);
 
-            let block = i / 8;
-            if let Some(block_data) = &self.blocks[block].data {
+            let block = &self.blocks.borrow()[i / 8];
+            if block.initialized {
                 let chunk = i % 8;
-                block_data[chunk].read(
+                block.data[chunk].read(
                     data_begin - data_begin_as_chunk,
                     &mut buf[data_begin - pos..data_end - pos],
                 )?
@@ -338,15 +366,78 @@ impl RandomAccessFile for WearLeveling {
 
         Ok(())
     }
-    fn write(&self, _pos: usize, _buf: &[u8]) -> Result<(), Error> {
-        unimplemented!()
+    fn write(&self, pos: usize, buf: &[u8]) -> Result<(), Error> {
+        // TODO: implement proper reallocating
+
+        let end = pos + buf.len();
+
+        // chunk index range the operation covers
+        let begin_chunk = pos / 0x200;
+        let end_chunk = divide_up(end, 0x200);
+
+        for i in begin_chunk..end_chunk {
+            // data range of this chunk
+            let data_begin_as_chunk = i * 0x200;
+            let data_end_as_chunk = (i + 1) * 0x200;
+
+            // data range to read within this chunk
+            let data_begin = std::cmp::max(data_begin_as_chunk, pos);
+            let data_end = std::cmp::min(data_end_as_chunk, end);
+
+            let block = &mut self.blocks.borrow_mut()[i / 8];
+            if !block.initialized {
+                block.initialized = true;
+                if block.allocate_count == 0 {
+                    block.allocate_count = 1;
+                }
+                for chunk in block.data.iter() {
+                    chunk.write(0, &CHUNK_INIT)?;
+                }
+            }
+
+            block.dirty = true;
+
+            let chunk = i % 8;
+            block.data[chunk].write(
+                data_begin - data_begin_as_chunk,
+                &buf[data_begin - pos..data_end - pos],
+            )?
+        }
+
+        Ok(())
     }
     fn len(&self) -> usize {
         // -1 for the reserved block
-        (self.blocks.len() - 1) * 0x1000
+        (self.blocks.borrow().len() - 1) * 0x1000
     }
     fn commit(&self) -> Result<(), Error> {
-        unimplemented!()
+        // TODO: implement proper reallocating and journal recording.
+        // we now simply squash the journal.
+        for (i, block) in self.blocks.borrow_mut().iter_mut().enumerate() {
+            if block.initialized && block.dirty {
+                for data in block.data.iter() {
+                    data.commit()?;
+                }
+                block.dirty = false;
+            }
+            self.block_map.write(
+                8 + 10 * i,
+                &[block.physical_block + ((block.initialized as u8) << 7)],
+            )?;
+            self.block_map
+                .write(8 + 10 * i + 1, &[block.allocate_count])?;
+            let mut crc_ticket = [0; 8];
+            block.crc_ticket.read(0, &mut crc_ticket)?;
+            self.block_map.write(8 + 10 * i + 2, &crc_ticket)?;
+        }
+
+        self.block_map.commit()?;
+
+        for offset in 0..self.journal_list.len() {
+            self.journal_list.write(offset, &[0xFF])?;
+        }
+
+        Ok(())
     }
 }
 
@@ -367,7 +458,7 @@ pub mod test {
             let crc = Rc::new(MemoryFile::new(crc));
             let data = Rc::new(MemoryFile::new(init));
             let mut file =
-                CrcFile::new(SimpleCrcStub::new(crc.clone()).unwrap(), data.clone()).unwrap();
+                CrcFile::new(SimpleCrcStub::new(crc.clone()).unwrap(), data.clone(), true).unwrap();
             let mut buf = vec![0; len];
             file.read(0, &mut buf).unwrap();
             let plain = MemoryFile::new(buf);
@@ -375,7 +466,10 @@ pub mod test {
                 &mut file,
                 |file| file,
                 |file| file.commit().unwrap(),
-                || CrcFile::new(SimpleCrcStub::new(crc.clone()).unwrap(), data.clone()).unwrap(),
+                || {
+                    CrcFile::new(SimpleCrcStub::new(crc.clone()).unwrap(), data.clone(), true)
+                        .unwrap()
+                },
                 &plain,
                 len,
             );
@@ -393,7 +487,7 @@ pub mod test {
             let crc = Rc::new(MemoryFile::new(crc));
             let data = Rc::new(MemoryFile::new(init));
             let mut file =
-                CrcFile::new(XorCrcStub::new(crc.clone()).unwrap(), data.clone()).unwrap();
+                CrcFile::new(XorCrcStub::new(crc.clone()).unwrap(), data.clone(), true).unwrap();
             let mut buf = vec![0; len];
             file.read(0, &mut buf).unwrap();
             let plain = MemoryFile::new(buf);
@@ -401,7 +495,7 @@ pub mod test {
                 &mut file,
                 |file| file,
                 |file| file.commit().unwrap(),
-                || CrcFile::new(XorCrcStub::new(crc.clone()).unwrap(), data.clone()).unwrap(),
+                || CrcFile::new(XorCrcStub::new(crc.clone()).unwrap(), data.clone(), true).unwrap(),
                 &plain,
                 len,
             );
@@ -428,6 +522,46 @@ pub mod test {
                 || MirroredFile::new(data0.clone(), data1.clone()).unwrap(),
                 &plain,
                 len,
+            );
+        }
+    }
+
+    #[test]
+    fn fuzz_wear_leveling() {
+        let mut rng = rand::thread_rng();
+        for _ in 0..10 {
+            let len = if rng.gen() { 0x20000 } else { 0x80000 };
+            let virtual_block_count = len / 0x1000 - 1;
+            let init = Rc::new(MemoryFile::new(vec![0xFF; len]));
+            let plain = MemoryFile::new(vec![0xFF; len - 0x2000]);
+            use rand::seq::SliceRandom;
+            let mut blocks: Vec<_> = (1..(virtual_block_count + 1) as u8).collect();
+            blocks[..].shuffle(&mut rng);
+
+            let block_map =
+                Rc::new(SubFile::new(init.clone(), 0, 8 + virtual_block_count * 10).unwrap());
+            let block_map_crc =
+                Rc::new(SubFile::new(init.clone(), 8 + virtual_block_count * 10, 2).unwrap());
+            let block_map = Rc::new(
+                CrcFile::new(SimpleCrcStub::new(block_map_crc).unwrap(), block_map, false).unwrap(),
+            );
+
+            for (i, block) in blocks.into_iter().enumerate() {
+                block_map.write(8 + i * 10, &[block]).unwrap();
+                block_map.write(8 + i * 10 + 1, &[rng.gen()]).unwrap();
+                block_map.write(8 + i * 10 + 2, &[0; 8]).unwrap();
+            }
+            block_map.commit().unwrap();
+            std::mem::drop(block_map);
+
+            let mut file = WearLeveling::new(init.clone()).unwrap();
+            crate::random_access_file::fuzzer(
+                &mut file,
+                |file| file,
+                |file| file.commit().unwrap(),
+                || WearLeveling::new(init.clone()).unwrap(),
+                &plain,
+                len - 0x2000,
             );
         }
     }
