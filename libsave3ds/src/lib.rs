@@ -46,6 +46,12 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::*;
 use std::rc::Rc;
 
+struct CartInfo {
+    wear_leveling: bool,
+    key_y: [u8; 16],
+    repeat_ctr: bool,
+}
+
 pub struct Resource {
     sd: Option<Rc<Sd>>,
     nand: Option<Rc<Nand>>,
@@ -406,7 +412,7 @@ impl Resource {
         SaveData::new(file, SaveDataType::Bare)
     }
 
-    pub fn get_cart_save_key_y(&self) -> Result<([u8; 16], bool), Error> {
+    fn get_cart_info(&self) -> Result<CartInfo, Error> {
         let game = disk_file::DiskFile::new(std::fs::File::open(
             self.game_path.as_ref().ok_or(Error::MissingGame)?,
         )?)?;
@@ -419,6 +425,12 @@ impl Resource {
 
         let mut cci_flags = [0; 8];
         game.read(0x188, &mut cci_flags)?;
+
+        let wear_leveling = match cci_flags[5] {
+            1 => true,
+            2 => false,
+            _ => return Err(Error::BrokenGame),
+        };
 
         let cxi_offset = read_struct::<U32le>(&game, 0x120)?.v * 0x200;
         let cxi_len = read_struct::<U32le>(&game, 0x124)?.v * 0x200;
@@ -552,7 +564,11 @@ impl Resource {
             _ => return Err(Error::Unsupported),
         }
 
-        Ok((key_y, repeat_ctr))
+        Ok(CartInfo {
+            wear_leveling,
+            key_y,
+            repeat_ctr,
+        })
     }
 
     pub fn open_cart_save(&self, path: &str, write: bool) -> Result<CartSaveData, Error> {
@@ -563,11 +579,15 @@ impl Resource {
                 .open(path)?,
         )?);
 
-        let (key_y, repeat_ctr) = self.get_cart_save_key_y()?;
+        let CartInfo {
+            wear_leveling,
+            key_y,
+            repeat_ctr,
+        } = self.get_cart_info()?;
         let key = key_engine::scramble(self.key_x_dec.ok_or(Error::MissingBoot9)?, key_y);
         let key_cmac = key_engine::scramble(self.key_x_sign.ok_or(Error::MissingBoot9)?, key_y);
 
-        CartSaveData::new(file, key, key_cmac, repeat_ctr)
+        CartSaveData::new(file, wear_leveling, key, key_cmac, repeat_ctr)
     }
 
     pub fn open_db(&self, db_type: DbType, write: bool) -> Result<Db, Error> {

@@ -7,25 +7,26 @@ use crate::wear_leveling::*;
 use std::rc::Rc;
 
 pub struct CartSaveData {
-    wear_leveling: Rc<WearLeveling>,
+    wear_leveling: Option<Rc<WearLeveling>>,
     save_data: SaveData,
 }
 
 impl CartSaveData {
     pub fn new(
         file: Rc<dyn RandomAccessFile>,
+        wear_leveling: bool,
         key: [u8; 16],
         key_cmac: [u8; 16],
         repeat_ctr: bool,
     ) -> Result<CartSaveData, Error> {
-        let wear_leveling = Rc::new(WearLeveling::new(file)?);
+        let (wear_leveling, file): (_, Rc<dyn RandomAccessFile>) = if wear_leveling {
+            let wear_leveling = Rc::new(WearLeveling::new(file)?);
+            (Some(wear_leveling.clone()), wear_leveling)
+        } else {
+            (None, file)
+        };
 
-        let save = Rc::new(AesCtrFile::new(
-            wear_leveling.clone(),
-            key,
-            [0; 16],
-            repeat_ctr,
-        ));
+        let save = Rc::new(AesCtrFile::new(file, key, [0; 16], repeat_ctr));
 
         Ok(CartSaveData {
             wear_leveling,
@@ -49,7 +50,10 @@ impl FileSystem for CartSaveData {
 
     fn commit(&self) -> Result<(), Error> {
         self.save_data.commit()?;
-        self.wear_leveling.commit()
+        if let Some(wear_leveling) = &self.wear_leveling {
+            wear_leveling.commit()?;
+        }
+        Ok(())
     }
 
     fn stat(&self) -> Result<Stat, Error> {
