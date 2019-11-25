@@ -231,12 +231,12 @@ impl SaveData {
         }
     }
 
-    pub fn calculate_size(param: &SaveDataFormatParam, block_count: usize) -> usize {
+    fn calculate_size(param: &SaveDataFormatParam, block_count: usize) -> usize {
         let info = SaveData::calculate_info(param, block_count);
         Disa::calculate_size(&info.param_a, info.param_b.as_ref())
     }
 
-    pub fn calculate_capacity(param: &SaveDataFormatParam, disa_len: usize) -> usize {
+    fn calculate_capacity(param: &SaveDataFormatParam, disa_len: usize) -> usize {
         let min_disa_len = SaveData::calculate_size(param, 1);
         if min_disa_len > disa_len {
             return 0;
@@ -277,8 +277,11 @@ impl SaveData {
         file: Rc<dyn RandomAccessFile>,
         save_data_type: SaveDataType,
         param: &SaveDataFormatParam,
-        block_count: usize,
     ) -> Result<(), Error> {
+        let block_count = SaveData::calculate_capacity(param, file.len());
+        if block_count == 0 {
+            return make_error(Error::NoSpace);
+        }
         let info = SaveData::calculate_info(param, block_count);
         Disa::format(
             file.clone(),
@@ -794,10 +797,8 @@ mod test {
             };
 
             let disa_len = rng.gen_range(100_000, 1_000_000);
-            let block_count = SaveData::calculate_capacity(&param, disa_len);
-            assert!(block_count != 0);
             let disa_raw = Rc::new(MemoryFile::new(vec![0; disa_len]));
-            SaveData::format(disa_raw.clone(), SaveDataType::Bare, &param, block_count).unwrap();
+            SaveData::format(disa_raw.clone(), SaveDataType::Bare, &param).unwrap();
             let file_system = SaveData::new(disa_raw.clone(), SaveDataType::Bare).unwrap();
 
             crate::file_system::test::fuzzer(

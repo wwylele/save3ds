@@ -256,11 +256,6 @@ impl Resource {
         param: &SaveDataFormatParam,
         len: usize,
     ) -> Result<(), Error> {
-        let block_count = SaveData::calculate_capacity(param, len);
-        if block_count == 0 {
-            return make_error(Error::NoSpace);
-        }
-
         let id_high = format!("{:08x}", id >> 32);
         let id_low = format!("{:08x}", id & 0xFFFF_FFFF);
         let sub_path = ["title", &id_high, &id_low, "data", "00000001.sav"];
@@ -273,7 +268,6 @@ impl Resource {
             file,
             SaveDataType::Sd(self.key_sign.ok_or(Error::MissingBoot9)?, id),
             &param,
-            block_count,
         )?;
 
         Ok(())
@@ -302,11 +296,6 @@ impl Resource {
         param: &SaveDataFormatParam,
         len: usize,
     ) -> Result<(), Error> {
-        let block_count = SaveData::calculate_capacity(param, len);
-        if block_count == 0 {
-            return make_error(Error::NoSpace);
-        }
-
         let sub_path = [
             "data",
             self.id0.as_ref().ok_or(Error::MissingNand)?,
@@ -323,7 +312,6 @@ impl Resource {
             file,
             SaveDataType::Nand(self.key_sign.ok_or(Error::MissingBoot9)?, id),
             &param,
-            block_count,
         )?;
 
         Ok(())
@@ -382,11 +370,6 @@ impl Resource {
         param: &SaveDataFormatParam,
         len: usize,
     ) -> Result<(), Error> {
-        let block_count = SaveData::calculate_capacity(param, len);
-        if block_count == 0 {
-            return make_error(Error::NoSpace);
-        }
-
         std::fs::File::create(path)?.set_len(len as u64)?;
 
         let file = Rc::new(DiskFile::new(
@@ -396,7 +379,7 @@ impl Resource {
                 .open(path)?,
         )?);
 
-        SaveData::format(file, SaveDataType::Bare, &param, block_count)?;
+        SaveData::format(file, SaveDataType::Bare, &param)?;
 
         Ok(())
     }
