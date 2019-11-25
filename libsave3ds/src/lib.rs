@@ -46,12 +46,6 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::*;
 use std::rc::Rc;
 
-struct CartInfo {
-    wear_leveling: bool,
-    key_y: [u8; 16],
-    repeat_ctr: bool,
-}
-
 pub struct Resource {
     sd: Option<Rc<Sd>>,
     nand: Option<Rc<Nand>>,
