@@ -557,6 +557,26 @@ impl Resource {
         })
     }
 
+    pub fn format_cart_save(
+        &self,
+        path: &str,
+        param: &SaveDataFormatParam,
+        len: usize,
+    ) -> Result<(), Error> {
+        std::fs::File::create(path)?.set_len(len as u64)?;
+
+        let file = Rc::new(DiskFile::new(
+            std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(path)?,
+        )?);
+
+        CartSaveData::format(file, self.get_cart_format()?, &param)?;
+
+        Ok(())
+    }
+
     pub fn open_cart_save(&self, path: &str, write: bool) -> Result<CartSaveData, Error> {
         let file = Rc::new(DiskFile::new(
             std::fs::OpenOptions::new()

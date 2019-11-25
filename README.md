@@ -32,7 +32,7 @@ TODO:
 ### Unix-like (no FUSE)
 ```
 cd save3ds_fuse && cargo build --no-default-features
-````
+```
 
 ### Windows (no FUSE)
 
@@ -92,15 +92,15 @@ You can put options in arbitrary order. The detail description of them are:
 The parameters supported by `--format` are
  - `max_dir`/`max_file`: the maximum number of directories/files. The default is `100`
  - `dir_buckets`/`file_buckets`: the bucket count of the hash table for directories/files. The default value is calculated from `max_dir`/`max_file` using the common algorithm games use.
- - `len`: only for save data archive. Limits the physical size in bytes of the save data file. The defualt is `524288` (512 KiB).
- - `block_len`: only for save data archive. The value can only be `512` or `4096`. The default is `512` for `--sdsave` and `--bare`, and `4096` for `--nandsave`.
+ - `len`: only for save data archive. Limits the physical size in bytes of the save data file. The defualt is `524288` (512 KiB). For Card1 cartridge save, only `131072` (128 KiB), `524288` (512 KiB), and `1048576` (1 MiB) are allowed, are must match the cartidge chip type.
+ - `block_len`: only for save data archive. The value can only be `512` or `4096`. The default is `512` for `--sdsave` and `--bare`, and `4096` for `--nandsave` and `--cart`.
  - `duplicate_data`: only for save data archive. The value can only be `true` or `false`. The default is `true`
 
 If you want leave all parameters in default values, you can specify an empty option, e.g. `--format ""`
 
 These parameters behave the same as those in the `fs:USER` 3DS service functions: `FormatSaveData`, `CreateSystemSaveData` and `CreateExtSaveData`. However, the `max_dir`/`max_file` specified here is two/one larger than the one in `CreateExtSaveData`, as the latter one automatically counts the required `/user`, `/boss` and `/icon`.
 
-Title database files and cartridge save currently don't support `--format`.
+Title database files currently don't support `--format`.
 
 ## Example command
 ```bash
