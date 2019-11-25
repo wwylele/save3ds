@@ -158,7 +158,7 @@ impl RandomAccessFile for FakeSizeFile {
     }
 }
 
-pub struct DbSigner {
+struct DbSigner {
     pub id: u32,
 }
 
@@ -184,7 +184,7 @@ pub struct Db {
 }
 
 impl Db {
-    pub fn new(
+    pub(crate) fn new(
         file: Rc<dyn RandomAccessFile>,
         db_type: DbType,
         key: [u8; 16],

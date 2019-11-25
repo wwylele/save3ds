@@ -4,7 +4,6 @@ use crate::error::*;
 use crate::fat::*;
 use crate::file_system::*;
 use crate::fs_meta::{self, FileInfo, FsInfo, OffsetOrFatFile};
-use crate::memory_file::MemoryFile;
 use crate::misc::*;
 use crate::random_access_file::*;
 use crate::save_ext_common::*;
@@ -15,7 +14,7 @@ use std::rc::Rc;
 
 #[derive(ByteStruct, Clone)]
 #[byte_struct_le]
-pub struct SaveFile {
+pub(crate) struct SaveFile {
     pub next: u32,
     pub padding1: u32,
     pub block: u32,
@@ -36,7 +35,7 @@ type FsMeta = fs_meta::FsMeta<SaveExtKey, SaveExtDir, SaveExtKey, SaveFile>;
 type DirMeta = fs_meta::DirMeta<SaveExtKey, SaveExtDir, SaveExtKey, SaveFile>;
 type FileMeta = fs_meta::FileMeta<SaveExtKey, SaveExtDir, SaveExtKey, SaveFile>;
 
-pub struct NandSaveSigner {
+struct NandSaveSigner {
     pub id: u32,
 }
 
@@ -50,7 +49,7 @@ impl Signer for NandSaveSigner {
     }
 }
 
-pub struct CtrSav0Signer {}
+struct CtrSav0Signer {}
 
 impl Signer for CtrSav0Signer {
     fn block(&self, mut data: Vec<u8>) -> Vec<u8> {
@@ -60,7 +59,7 @@ impl Signer for CtrSav0Signer {
     }
 }
 
-pub struct SdSaveSigner {
+struct SdSaveSigner {
     pub id: u64,
 }
 impl Signer for SdSaveSigner {
@@ -72,7 +71,7 @@ impl Signer for SdSaveSigner {
     }
 }
 
-pub struct CartSaveSigner {}
+struct CartSaveSigner {}
 impl Signer for CartSaveSigner {
     fn block(&self, data: Vec<u8>) -> Vec<u8> {
         let mut result = Vec::from(&b"CTR-NOR0"[..]);
@@ -105,7 +104,7 @@ pub struct SaveData {
 }
 
 #[derive(Clone)]
-pub enum SaveDataType {
+pub(crate) enum SaveDataType {
     Nand([u8; 16], u32),
     Sd([u8; 16], u64),
     Cart([u8; 16]),
@@ -259,11 +258,6 @@ impl SaveData {
         min_block
     }
 
-    pub fn from_vec(v: Vec<u8>, save_data_type: SaveDataType) -> Result<SaveData, Error> {
-        let file = Rc::new(MemoryFile::new(v));
-        SaveData::new(file, save_data_type)
-    }
-
     fn get_signer(save_data_type: SaveDataType) -> Option<(Box<dyn Signer>, [u8; 16])> {
         match save_data_type {
             SaveDataType::Bare => None,
@@ -273,7 +267,7 @@ impl SaveData {
         }
     }
 
-    pub fn format(
+    pub(crate) fn format(
         file: Rc<dyn RandomAccessFile>,
         save_data_type: SaveDataType,
         param: &SaveDataFormatParam,
@@ -413,7 +407,7 @@ impl SaveData {
         Ok(())
     }
 
-    pub fn new(
+    pub(crate) fn new(
         file: Rc<dyn RandomAccessFile>,
         save_data_type: SaveDataType,
     ) -> Result<SaveData, Error> {
@@ -751,6 +745,7 @@ impl FileSystem for SaveData {
 
 #[cfg(test)]
 mod test {
+    use crate::memory_file::*;
     use crate::save_data::*;
     #[test]
     fn struct_size() {

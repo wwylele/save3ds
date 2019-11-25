@@ -15,7 +15,7 @@ use std::rc::Rc;
 
 #[derive(ByteStruct, Clone)]
 #[byte_struct_le]
-pub struct ExtFile {
+struct ExtFile {
     pub next: u32,
     pub padding1: u32,
     pub block: u32,
@@ -37,7 +37,7 @@ type DirMeta = fs_meta::DirMeta<SaveExtKey, SaveExtDir, SaveExtKey, ExtFile>;
 type FileMeta = fs_meta::FileMeta<SaveExtKey, SaveExtDir, SaveExtKey, ExtFile>;
 
 #[derive(Clone)]
-pub struct ExtSigner {
+struct ExtSigner {
     pub id: u64,
     pub sub_id: Option<u64>,
 }
@@ -115,7 +115,7 @@ pub struct ExtData {
 }
 
 impl ExtData {
-    pub fn format(
+    pub(crate) fn format(
         sd_nand: &dyn SdNandFileSystem,
         base_path: &[&str],
         id: u64,
@@ -331,7 +331,7 @@ impl ExtData {
         Ok(())
     }
 
-    pub fn new(
+    pub(crate) fn new(
         sd_nand: Rc<dyn SdNandFileSystem>,
         base_path: &[&str],
         id: u64,
