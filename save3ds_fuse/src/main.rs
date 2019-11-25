@@ -1459,7 +1459,7 @@ fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
     } else if let Some(cart) = cart_path {
         if let Some(format_param) = format_param {
             println!("Formatting...");
-            let (param, len) = to_save_data_format_param(format_param, 4096)?;
+            let (param, len) = to_save_data_format_param(format_param, 512)?;
             resource.format_cart_save(&cart, &param, len)?;
             println!("Formatting done");
         }
