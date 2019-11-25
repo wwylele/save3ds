@@ -6,18 +6,48 @@ use crate::save_data::*;
 use crate::wear_leveling::*;
 use std::rc::Rc;
 
+pub struct CartFormat {
+    pub wear_leveling: bool,
+    pub key: [u8; 16],
+    pub key_cmac: [u8; 16],
+    pub repeat_ctr: bool,
+}
+
 pub struct CartSaveData {
     wear_leveling: Option<Rc<WearLeveling>>,
     save_data: SaveData,
 }
 
 impl CartSaveData {
+    pub fn format(
+        file: Rc<dyn RandomAccessFile>,
+        CartFormat {
+            wear_leveling,
+            key,
+            key_cmac,
+            repeat_ctr,
+        }: CartFormat,
+        param: &SaveDataFormatParam,
+    ) -> Result<(), Error> {
+        let (wear_leveling, file): (_, Rc<dyn RandomAccessFile>) = if wear_leveling {
+            unimplemented!();
+            let wear_leveling = Rc::new(WearLeveling::new(file)?);
+            (Some(wear_leveling.clone()), wear_leveling)
+        } else {
+            (None, file)
+        };
+
+        Ok(())
+    }
+
     pub fn new(
         file: Rc<dyn RandomAccessFile>,
-        wear_leveling: bool,
-        key: [u8; 16],
-        key_cmac: [u8; 16],
-        repeat_ctr: bool,
+        CartFormat {
+            wear_leveling,
+            key,
+            key_cmac,
+            repeat_ctr,
+        }: CartFormat,
     ) -> Result<CartSaveData, Error> {
         let (wear_leveling, file): (_, Rc<dyn RandomAccessFile>) = if wear_leveling {
             let wear_leveling = Rc::new(WearLeveling::new(file)?);

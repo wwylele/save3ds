@@ -412,7 +412,7 @@ impl Resource {
         SaveData::new(file, SaveDataType::Bare)
     }
 
-    fn get_cart_info(&self) -> Result<CartInfo, Error> {
+    fn get_cart_format(&self) -> Result<CartFormat, Error> {
         let game = disk_file::DiskFile::new(std::fs::File::open(
             self.game_path.as_ref().ok_or(Error::MissingGame)?,
         )?)?;
@@ -564,9 +564,12 @@ impl Resource {
             _ => return Err(Error::Unsupported),
         }
 
-        Ok(CartInfo {
+        let key = key_engine::scramble(self.key_x_dec.ok_or(Error::MissingBoot9)?, key_y);
+        let key_cmac = key_engine::scramble(self.key_x_sign.ok_or(Error::MissingBoot9)?, key_y);
+        Ok(CartFormat {
             wear_leveling,
-            key_y,
+            key,
+            key_cmac,
             repeat_ctr,
         })
     }
@@ -579,15 +582,7 @@ impl Resource {
                 .open(path)?,
         )?);
 
-        let CartInfo {
-            wear_leveling,
-            key_y,
-            repeat_ctr,
-        } = self.get_cart_info()?;
-        let key = key_engine::scramble(self.key_x_dec.ok_or(Error::MissingBoot9)?, key_y);
-        let key_cmac = key_engine::scramble(self.key_x_sign.ok_or(Error::MissingBoot9)?, key_y);
-
-        CartSaveData::new(file, wear_leveling, key, key_cmac, repeat_ctr)
+        CartSaveData::new(file, self.get_cart_format()?)
     }
 
     pub fn open_db(&self, db_type: DbType, write: bool) -> Result<Db, Error> {
