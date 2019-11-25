@@ -30,13 +30,19 @@ impl CartSaveData {
         param: &SaveDataFormatParam,
     ) -> Result<(), Error> {
         let (wear_leveling, file): (_, Rc<dyn RandomAccessFile>) = if wear_leveling {
-            unimplemented!();
+            Rc::new(WearLeveling::format(file.clone())?);
             let wear_leveling = Rc::new(WearLeveling::new(file)?);
             (Some(wear_leveling.clone()), wear_leveling)
         } else {
             (None, file)
         };
 
+        let save = Rc::new(AesCtrFile::new(file, key, [0; 16], repeat_ctr));
+
+        SaveData::format(save, SaveDataType::Cart(key_cmac), param)?;
+        if let Some(wear_leveling) = wear_leveling {
+            wear_leveling.commit()?;
+        }
         Ok(())
     }
 

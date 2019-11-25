@@ -174,6 +174,62 @@ pub struct WearLeveling {
 }
 
 impl WearLeveling {
+    pub fn format(parent: Rc<dyn RandomAccessFile>) -> Result<(), Error> {
+        let len = parent.len();
+        if len != 0x20_000 && len != 0x80_000 && len != 0x100_000 {
+            return Err(Error::SizeMismatch);
+        }
+        let large_save = len == 0x100_000;
+
+        let virtual_block_count = len / 0x1000 - 1;
+
+        let block_map_len = if large_save {
+            0x3FE
+        } else {
+            8 + virtual_block_count * 10
+        };
+
+        let block_map = Rc::new(SubFile::new(parent.clone(), 0, block_map_len)?);
+        let block_map_crc = Rc::new(SubFile::new(parent.clone(), block_map_len, 2)?);
+        let block_map = Rc::new(CrcFile::new(
+            SimpleCrcStub::new(block_map_crc)?,
+            block_map,
+            false,
+        )?);
+
+        block_map.write(0, &[0; 8])?;
+
+        let item_len = if large_save { 2 } else { 10 };
+        for i in 0..virtual_block_count {
+            if large_save {
+                block_map.write(8 + i * item_len, &[0])?;
+                block_map.write(8 + i * item_len + 1, &[(i + 1) as u8])?;
+            } else {
+                block_map.write(8 + i * item_len, &[(i + 1) as u8])?;
+                block_map.write(8 + i * item_len + 1, &[0])?;
+                block_map.write(8 + i * item_len + 2, &[0; 8])?;
+            }
+        }
+        for pos in 8 + virtual_block_count * item_len..block_map_len {
+            block_map.write(pos, &[0])?;
+        }
+
+        block_map.commit()?;
+
+        let journal_start = block_map_len + 2;
+        let journal_list = Rc::new(SubFile::new(
+            parent.clone(),
+            journal_start,
+            0x1000 - journal_start,
+        )?);
+
+        for pos in 0..journal_list.len() {
+            journal_list.write(pos, &[0xFF])?;
+        }
+
+        Ok(())
+    }
+
     pub fn new(parent: Rc<dyn RandomAccessFile>) -> Result<WearLeveling, Error> {
         let len = parent.len();
         if len != 0x20_000 && len != 0x80_000 && len != 0x100_000 {
@@ -564,32 +620,37 @@ pub mod test {
     #[test]
     fn fuzz_wear_leveling_small() {
         let mut rng = rand::thread_rng();
-        for _ in 0..10 {
+        for i in 0..10 {
             let len = if rng.gen() { 0x20_000 } else { 0x80_000 };
             let virtual_block_count = len / 0x1000 - 1;
             let init = Rc::new(MemoryFile::new(vec![0xFF; len]));
             let plain = MemoryFile::new(vec![0xFF; len - 0x2000]);
-            use rand::seq::SliceRandom;
-            let mut blocks: Vec<_> = (1..(virtual_block_count + 1) as u8).collect();
-            blocks[..].shuffle(&mut rng);
 
-            let block_map =
-                Rc::new(SubFile::new(init.clone(), 0, 8 + virtual_block_count * 10).unwrap());
-            let block_map_crc =
-                Rc::new(SubFile::new(init.clone(), 8 + virtual_block_count * 10, 2).unwrap());
-            let block_map = Rc::new(
-                CrcFile::new(SimpleCrcStub::new(block_map_crc).unwrap(), block_map, false).unwrap(),
-            );
+            if i % 2 == 0 {
+                use rand::seq::SliceRandom;
+                let mut blocks: Vec<_> = (1..(virtual_block_count + 1) as u8).collect();
+                blocks[..].shuffle(&mut rng);
 
-            for (i, block) in blocks.into_iter().enumerate() {
-                block_map.write(8 + i * 10, &[block]).unwrap();
-                block_map.write(8 + i * 10 + 1, &[rng.gen()]).unwrap();
-                block_map.write(8 + i * 10 + 2, &[0; 8]).unwrap();
-            }
-            block_map.commit().unwrap();
-            std::mem::drop(block_map);
+                let block_map =
+                    Rc::new(SubFile::new(init.clone(), 0, 8 + virtual_block_count * 10).unwrap());
+                let block_map_crc =
+                    Rc::new(SubFile::new(init.clone(), 8 + virtual_block_count * 10, 2).unwrap());
+                let block_map = Rc::new(
+                    CrcFile::new(SimpleCrcStub::new(block_map_crc).unwrap(), block_map, false)
+                        .unwrap(),
+                );
 
+                for (i, block) in blocks.into_iter().enumerate() {
+                    block_map.write(8 + i * 10, &[block]).unwrap();
+                    block_map.write(8 + i * 10 + 1, &[rng.gen()]).unwrap();
+                    block_map.write(8 + i * 10 + 2, &[0; 8]).unwrap();
+                }
+                block_map.commit().unwrap();
+                std::mem::drop(block_map);
             // TODO: random journal
+            } else {
+                WearLeveling::format(init.clone()).unwrap();
+            }
 
             let mut file = WearLeveling::new(init.clone()).unwrap();
             crate::random_access_file::fuzzer(
@@ -606,31 +667,36 @@ pub mod test {
     #[test]
     fn fuzz_wear_leveling_large() {
         let mut rng = rand::thread_rng();
-        for _ in 0..10 {
+        for i in 0..10 {
             let len = 0x100_000;
             let init = Rc::new(MemoryFile::new(vec![0xFF; len]));
             let plain = MemoryFile::new(vec![0xFF; len - 0x2000]);
-            use rand::seq::SliceRandom;
-            let mut blocks: Vec<_> = (1..=255).collect();
-            blocks[..].shuffle(&mut rng);
 
-            let block_map = Rc::new(SubFile::new(init.clone(), 0, 0x3FE).unwrap());
-            let block_map_crc = Rc::new(SubFile::new(init.clone(), 0x3FE, 2).unwrap());
-            let block_map = Rc::new(
-                CrcFile::new(SimpleCrcStub::new(block_map_crc).unwrap(), block_map, false).unwrap(),
-            );
+            if i % 2 == 0 {
+                use rand::seq::SliceRandom;
+                let mut blocks: Vec<_> = (1..=255).collect();
+                blocks[..].shuffle(&mut rng);
 
-            for (i, block) in blocks.into_iter().enumerate() {
-                block_map
-                    .write(8 + i * 2, &[rng.gen::<u8>() & 0x7F])
-                    .unwrap();
-                block_map.write(8 + i * 2 + 1, &[block]).unwrap();
-            }
-            block_map.commit().unwrap();
+                let block_map = Rc::new(SubFile::new(init.clone(), 0, 0x3FE).unwrap());
+                let block_map_crc = Rc::new(SubFile::new(init.clone(), 0x3FE, 2).unwrap());
+                let block_map = Rc::new(
+                    CrcFile::new(SimpleCrcStub::new(block_map_crc).unwrap(), block_map, false)
+                        .unwrap(),
+                );
 
-            std::mem::drop(block_map);
+                for (i, block) in blocks.into_iter().enumerate() {
+                    block_map
+                        .write(8 + i * 2, &[rng.gen::<u8>() & 0x7F])
+                        .unwrap();
+                    block_map.write(8 + i * 2 + 1, &[block]).unwrap();
+                }
+                block_map.commit().unwrap();
 
+                std::mem::drop(block_map);
             // TODO: random journal
+            } else {
+                WearLeveling::format(init.clone()).unwrap();
+            }
 
             let mut file = WearLeveling::new(init.clone()).unwrap();
             crate::random_access_file::fuzzer(
