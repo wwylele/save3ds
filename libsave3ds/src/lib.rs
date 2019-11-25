@@ -566,7 +566,7 @@ impl Resource {
                 .open(path)?,
         )?);
 
-        CartSaveData::format(file, self.get_cart_format()?, &param)?;
+        CartSaveData::format(file, &self.get_cart_format()?, &param)?;
 
         Ok(())
     }
@@ -579,7 +579,7 @@ impl Resource {
                 .open(path)?,
         )?);
 
-        CartSaveData::new(file, self.get_cart_format()?)
+        CartSaveData::new(file, &self.get_cart_format()?)
     }
 
     pub fn open_db(&self, db_type: DbType, write: bool) -> Result<Db, Error> {

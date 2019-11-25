@@ -750,7 +750,6 @@ impl FileSystem for SaveData {
 }
 
 #[cfg(test)]
-#[allow(clippy::cognitive_complexity)]
 mod test {
     use crate::save_data::*;
     #[test]
