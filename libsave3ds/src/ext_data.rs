@@ -92,6 +92,11 @@ struct Quota {
     mount_len: u64,
 }
 
+/// Configuration for formatting an extdata.
+/// This is similar to parameters of
+/// [`FS:CreateExtSaveData`](https://www.3dbrew.org/wiki/FS:CreateExtSaveData),
+/// except the hash table bucket count is provided by the user.
+#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
 pub struct ExtDataFormatParam {
     pub max_dir: usize,
     pub dir_buckets: usize,
@@ -110,6 +115,7 @@ struct ExtDataInner {
     write: bool,
 }
 
+/// Implements [`FileSystem`](../file_system/trait.FileSystem.html) for extdata.
 pub struct ExtData {
     center: Rc<ExtDataInner>,
 }
@@ -438,6 +444,7 @@ impl ExtData {
     }
 }
 
+/// Implements [`FileSystemFile`](../file_system/trait.FileSystemFile.html) for extdata file.
 pub struct File {
     center: Rc<ExtDataInner>,
     meta: FileMeta,
@@ -589,6 +596,10 @@ impl FileSystemFile for File {
         self.meta.get_ino()
     }
 
+    /// Changes the size of this file.
+    ///
+    /// Warning: this operation is extremely slow for extdata.
+    /// Also, if the size is changed to zero, 3DS will refuse to open the file.
     fn resize(&mut self, len: usize) -> Result<(), Error> {
         if len == self.len() {
             return Ok(());
@@ -643,6 +654,10 @@ impl FileSystemFile for File {
         self.data.as_ref().map_or(0, |f| f.partition().len())
     }
 
+    /// Flushes all changes made to the file.
+    ///
+    /// If the file is dropped with uncommitted change, the changed region
+    /// becomes unintialized.
     fn commit(&self) -> Result<(), Error> {
         self.meta.check_exclusive()?;
         if let Some(f) = self.data.as_ref() {
@@ -652,6 +667,7 @@ impl FileSystemFile for File {
     }
 }
 
+/// Implements [`FileSystemDir`](../file_system/trait.FileSystemDir.html) for extdata directory.
 pub struct Dir {
     center: Rc<ExtDataInner>,
     meta: DirMeta,
@@ -711,6 +727,9 @@ impl FileSystemDir for Dir {
         })
     }
 
+    /// Creates a new sub file with the specified name and initial length, and opens it.
+    ///
+    /// Warning: if the file size is zero, 3DS will refuse to open the file.
     fn new_sub_file(&self, name: [u8; 16], len: usize) -> Result<Self::FileType, Error> {
         if self.meta.open_sub_file(name).is_ok() || self.meta.open_sub_dir(name).is_ok() {
             return make_error(Error::AlreadyExist);
@@ -752,10 +771,20 @@ impl FileSystem for ExtData {
         })
     }
 
+    /// Flushes all changes made to the extdata.
+    ///
+    /// If the extdata is dropped with uncommitted file system change
+    /// (new/delete/rename files/directories),
+    /// the change roll back to the state the last time `commit` is called.
+    /// The flush behavior of changing file data is controlled by
+    /// [`File::commit`](struct.File.html).
     fn commit(&self) -> Result<(), Error> {
         self.center.meta_file.commit()
     }
 
+    /// Returns the capacity information of the archive.
+    ///
+    /// `block_len`, `total_blocks` and `free_blocks` are set to 0.
     fn stat(&self) -> Result<Stat, Error> {
         let meta_stat = self.center.fs.stat()?;
         Ok(Stat {

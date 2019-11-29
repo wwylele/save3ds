@@ -99,6 +99,7 @@ struct SaveDataInner {
     block_count: usize,
 }
 
+/// Implements [`FileSystem`](../file_system/trait.FileSystem.html) for game save data.
 pub struct SaveData {
     center: Rc<SaveDataInner>,
 }
@@ -111,11 +112,20 @@ pub(crate) enum SaveDataType {
     Bare,
 }
 
+/// Block types of a save data.
+#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
 pub enum SaveDataBlockType {
-    Small, // 512-byte block, for game save
-    Large, // 4096-byte block, for NAND (system) save
+    /// 512-byte block, for game save.
+    Small,
+
+    /// 4096-byte block, for NAND (system) save.
+    Large,
 }
 
+/// Configuration for formatting a save data.
+/// This is similar to parameters of
+/// [`FS:FormatSaveData`](https://www.3dbrew.org/wiki/FS:FormatSaveData).
+#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
 pub struct SaveDataFormatParam {
     pub block_type: SaveDataBlockType,
     pub max_dir: usize,
@@ -487,6 +497,7 @@ impl SaveData {
     }
 }
 
+/// Implements [`FileSystemFile`](../file_system/trait.FileSystemFile.html) for save data file.
 pub struct File {
     center: Rc<SaveDataInner>,
     meta: FileMeta,
@@ -605,11 +616,13 @@ impl FileSystemFile for File {
         self.len
     }
 
+    /// This is a no-op.
     fn commit(&self) -> Result<(), Error> {
         Ok(())
     }
 }
 
+/// Implements [`FileSystemDir`](../file_system/trait.FileSystemDir.html) for save data directory.
 pub struct Dir {
     center: Rc<SaveDataInner>,
     meta: DirMeta,
@@ -710,6 +723,10 @@ impl FileSystemDir for Dir {
 impl FileSystem for SaveData {
     type FileType = File;
     type DirType = Dir;
+
+    /// Save data accepts an arbitrary 16-byte string as file / directory name.
+    /// However, this string is interpreted as ASCII on 3DS,
+    /// with 0 filled after the string termination.
     type NameType = [u8; 16];
 
     fn open_file(&self, ino: u32) -> Result<Self::FileType, Error> {
@@ -725,6 +742,15 @@ impl FileSystem for SaveData {
         })
     }
 
+    /// Flushes all changes made to the save data.
+    ///
+    /// If the save data is dropped with uncommitted change, the behavior depends on
+    /// the value of [`duplicate_data`](struct.SaveDataFormatParam.html#structfield.duplicate_data)
+    /// used when formatting the save data:
+    ///  - `duplicate_data == false`: changes made to the file system (new/delete/rename files/directories)
+    /// roll back to the state the last time `commit` is called. Changes to file data are dropped and the
+    /// affected region becomes uninitialized.
+    ///  - `duplicate_data == true`: all data rolls back to the state the last time `commit` is called.
     fn commit(&self) -> Result<(), Error> {
         self.center.disa.commit()
     }

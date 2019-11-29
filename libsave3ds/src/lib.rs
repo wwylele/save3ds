@@ -1,6 +1,6 @@
 mod aes_ctr_file;
 mod byte_struct_common;
-mod cart_save_data;
+pub mod cart_save_data;
 pub mod db;
 mod diff;
 mod difi_partition;
@@ -46,6 +46,8 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::*;
 use std::rc::Rc;
 
+/// Represents all resource associated with a 3DS console.
+/// Works as the root object to access all archives on the console.
 pub struct Resource {
     sd: Option<Rc<Sd>>,
     nand: Option<Rc<Nand>>,
@@ -62,6 +64,17 @@ pub struct Resource {
 }
 
 impl Resource {
+    /// Initializes all resource associated with a 3DS console.
+    /// All parameters are optional. However, if any archive to open later needs
+    /// a parameter that is not provided, it will fail. The meaning of these parameters are
+    /// - `boot9_path`: the path to the ARM9 bootrom image file.
+    /// - `movable_path`: the path to the `movable.sed` file.
+    /// - `sd_path`: the path to the SD root.
+    /// - `nand_path`: the path to the NAND root.
+    /// - `otp_path`: the path to the encrypted OTP file.
+    /// - `priv_path`: the path to the private header of the cartridge.
+    /// - `game_path`: the path to the game image of the cartridge.
+    /// - `x2f_key_y`: key Y of AES engine slot 0x2F.
     pub fn new(
         boot9_path: Option<String>,
         movable_path: Option<String>,
@@ -222,6 +235,7 @@ impl Resource {
         })
     }
 
+    /// Formats an extdata on SD.
     pub fn format_sd_ext(&self, id: u64, param: &ExtDataFormatParam) -> Result<(), Error> {
         ExtData::format(
             self.sd.as_ref().ok_or(Error::MissingSd)?.as_ref(),
@@ -233,6 +247,7 @@ impl Resource {
         )
     }
 
+    /// Opens an extdata on SD.
     pub fn open_sd_ext(&self, id: u64, write: bool) -> Result<ExtData, Error> {
         ExtData::new(
             self.sd.as_ref().ok_or(Error::MissingSd)?.clone(),
@@ -244,6 +259,7 @@ impl Resource {
         )
     }
 
+    /// Formats a save data on SD.
     pub fn format_sd_save(
         &self,
         id: u64,
@@ -267,6 +283,7 @@ impl Resource {
         Ok(())
     }
 
+    /// Opens a save data on SD.
     pub fn open_sd_save(&self, id: u64, write: bool) -> Result<SaveData, Error> {
         let id_high = format!("{:08x}", id >> 32);
         let id_low = format!("{:08x}", id & 0xFFFF_FFFF);
@@ -284,6 +301,7 @@ impl Resource {
         )
     }
 
+    /// Formats a save data on NAND.
     pub fn format_nand_save(
         &self,
         id: u32,
@@ -311,6 +329,7 @@ impl Resource {
         Ok(())
     }
 
+    /// Opens a save data on NAND.
     pub fn open_nand_save(&self, id: u32, write: bool) -> Result<SaveData, Error> {
         let file = self.nand.as_ref().ok_or(Error::MissingNand)?.open(
             &[
@@ -328,6 +347,7 @@ impl Resource {
         )
     }
 
+    /// Formats an extdata on NAND.
     pub fn format_nand_ext(&self, id: u64, param: &ExtDataFormatParam) -> Result<(), Error> {
         ExtData::format(
             self.nand.as_ref().ok_or(Error::MissingNand)?.as_ref(),
@@ -343,6 +363,7 @@ impl Resource {
         )
     }
 
+    /// Opens an extdata on NAND.
     pub fn open_nand_ext(&self, id: u64, write: bool) -> Result<ExtData, Error> {
         ExtData::new(
             self.nand.as_ref().ok_or(Error::MissingNand)?.clone(),
@@ -358,6 +379,12 @@ impl Resource {
         )
     }
 
+    /// Formats a stand-alone save data.
+    ///
+    /// Warning: because no crypto information can be provided for a stand-alone save data,
+    /// save data created by this function never has a correct signature, and must be fixed
+    /// using other tools to be usable on 3DS. Because of this limitation, this function is
+    /// mostly for test purpose.
     pub fn format_bare_save(
         &self,
         path: &str,
@@ -378,6 +405,12 @@ impl Resource {
         Ok(())
     }
 
+    /// Opens a stand-alone save data.
+    ///
+    /// Warning: because no crypto information can be provided for a stand-alone save data,
+    /// the signature will be invalid if the content of the save data is modified, and must be
+    /// fixed using other tools to be usable on 3DS. Because of this limitation, this function is
+    /// mostly for test purpose.
     pub fn open_bare_save(&self, path: &str, write: bool) -> Result<SaveData, Error> {
         let file = Rc::new(DiskFile::new(
             std::fs::OpenOptions::new()
@@ -551,6 +584,7 @@ impl Resource {
         })
     }
 
+    /// Formats a save data on cartridge.
     pub fn format_cart_save(
         &self,
         path: &str,
@@ -571,6 +605,7 @@ impl Resource {
         Ok(())
     }
 
+    /// Opens a save data on cartridge.
     pub fn open_cart_save(&self, path: &str, write: bool) -> Result<CartSaveData, Error> {
         let file = Rc::new(DiskFile::new(
             std::fs::OpenOptions::new()
@@ -582,6 +617,7 @@ impl Resource {
         CartSaveData::new(file, &self.get_cart_format()?)
     }
 
+    /// Opens a title database.
     pub fn open_db(&self, db_type: DbType, write: bool) -> Result<Db, Error> {
         let (file, key) = match db_type {
             DbType::NandTitle => (

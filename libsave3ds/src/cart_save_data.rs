@@ -6,20 +6,22 @@ use crate::save_data::*;
 use crate::wear_leveling::*;
 use std::rc::Rc;
 
-pub struct CartFormat {
+pub(crate) struct CartFormat {
     pub wear_leveling: bool,
     pub key: [u8; 16],
     pub key_cmac: [u8; 16],
     pub repeat_ctr: bool,
 }
 
+/// A wrapper of [`SaveData`](../save_data/struct.SaveData.html),
+/// specialized for cartridge save data. Implements [`FileSystem`](../file_system/trait.FileSystem.html).
 pub struct CartSaveData {
     wear_leveling: Option<Rc<WearLeveling>>,
     save_data: SaveData,
 }
 
 impl CartSaveData {
-    pub fn format(
+    pub(crate) fn format(
         file: Rc<dyn RandomAccessFile>,
         &CartFormat {
             wear_leveling,
@@ -46,7 +48,7 @@ impl CartSaveData {
         Ok(())
     }
 
-    pub fn new(
+    pub(crate) fn new(
         file: Rc<dyn RandomAccessFile>,
         &CartFormat {
             wear_leveling,

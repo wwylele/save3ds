@@ -67,7 +67,7 @@ impl DirInfo for DbDir {
 
 #[derive(ByteStruct, Clone, PartialEq)]
 #[byte_struct_le]
-pub(crate) struct DbFileKey {
+struct DbFileKey {
     parent: u32,
     name: u64,
 }
@@ -119,7 +119,7 @@ struct DbHeader {
     padding: u32,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
 pub enum DbType {
     Ticket,
     NandTitle,
@@ -179,6 +179,7 @@ struct DbInner {
     block_count: usize,
 }
 
+/// Implements [`FileSystem`](../file_system/trait.FileSystem.html) for title database.
 pub struct Db {
     center: Rc<DbInner>,
 }
@@ -311,6 +312,7 @@ impl Db {
     }
 }
 
+/// Implements [`FileSystemFile`](../file_system/trait.FileSystemFile.html) for title database file.
 pub struct File {
     center: Rc<DbInner>,
     meta: FileMeta,
@@ -344,6 +346,7 @@ impl File {
 }
 
 impl FileSystemFile for File {
+    /// Title database file uses 64-bit title ID for file name.
     type NameType = u64;
     type DirType = Dir;
 
@@ -423,17 +426,23 @@ impl FileSystemFile for File {
         self.len
     }
 
+    /// This is a no-op.
     fn commit(&self) -> Result<(), Error> {
         Ok(())
     }
 }
 
+/// Implements [`FileSystemDir`](../file_system/trait.FileSystemDir.html) for the title database root.
+///
+/// Title database does not support directories other than the root directory, so this struct only
+/// serves as an interface to access files the database contains.
 pub struct Dir {
     center: Rc<DbInner>,
     meta: DirMeta,
 }
 
 impl FileSystemDir for Dir {
+    /// The name type for title database directory is a placeholder.
     type NameType = u64;
     type FileType = File;
 
@@ -449,6 +458,7 @@ impl FileSystemDir for Dir {
         File::from_meta(self.center.clone(), self.meta.open_sub_file(name)?)
     }
 
+    /// Always returns an empty list.
     fn list_sub_dir(&self) -> Result<Vec<(u64, u32)>, Error> {
         Ok(vec![])
     }
@@ -490,18 +500,22 @@ impl FileSystemDir for Dir {
         }
     }
 
+    /// Always fails.
     fn rename(&mut self, _parent: &Self, _name: Self::NameType) -> Result<(), Error> {
         make_error(Error::Unsupported)
     }
 
+    /// Always fails.
     fn open_sub_dir(&self, _name: Self::NameType) -> Result<Self, Error> {
         make_error(Error::NotFound)
     }
 
+    /// Always fails.
     fn new_sub_dir(&self, _name: Self::NameType) -> Result<Self, Error> {
         make_error(Error::Unsupported)
     }
 
+    /// Always fails.
     fn delete(self) -> Result<(), Error> {
         make_error(Error::DeletingRoot)
     }
@@ -517,6 +531,8 @@ impl FileSystem for Db {
         File::from_meta(self.center.clone(), meta)
     }
 
+    /// Opens the directory with the specified inode.
+    /// Only the root directory (`ino = 1`) is supported.
     fn open_dir(&self, ino: u32) -> Result<Self::DirType, Error> {
         let meta = DirMeta::open_ino(self.center.fs.clone(), ino)?;
         Ok(Dir {
@@ -525,6 +541,10 @@ impl FileSystem for Db {
         })
     }
 
+    /// Flushes all changes made to the save data.
+    ///
+    /// If the save data is dropped with uncommitted change,
+    /// all data rolls back to the state the last time `commit` is called.
     fn commit(&self) -> Result<(), Error> {
         self.center.diff.commit()
     }

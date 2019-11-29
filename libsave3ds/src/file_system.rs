@@ -1,64 +1,148 @@
 use crate::error::*;
 
+/// The interface for a file opened from [`FileSystem`](trait.FileSystem.html).
 pub trait FileSystemFile {
+    /// The type of names the parent archive uses to name files and directories.
     type NameType;
+
+    /// The type of directories the parent archive contains.
     type DirType;
 
+    /// Renames the file and/or move the file to a new parent directory.
     fn rename(&mut self, parent: &Self::DirType, name: Self::NameType) -> Result<(), Error>;
+
+    /// Returns the inode of the parent directory.
     fn get_parent_ino(&self) -> Result<u32, Error>;
+
+    /// Returns the inode of this file.
     fn get_ino(&self) -> u32;
+
+    /// Deletes this file.
     fn delete(self) -> Result<(), Error>;
+
+    /// Changes the size of this file.
     fn resize(&mut self, len: usize) -> Result<(), Error>;
+
+    /// Reads bytes at position `pos` into `buf`. The lenth is determined by `buf.len()`.
+    /// If the read range contains uninitialized data, Error::HashMismatch is returned,
+    /// and the unintialized region will be filled with `0xDD`.
     fn read(&self, pos: usize, buf: &mut [u8]) -> Result<(), Error>;
+
+    /// Writes bytes to position `pos` from `buf`. The lenth is determined by `buf.len()`.
     fn write(&self, pos: usize, buf: &[u8]) -> Result<(), Error>;
+
+    /// Returns the length of this file.
     fn len(&self) -> usize;
+
+    /// Returns whether the file has size of zero.
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// Flushes all changes made to the file.
+    ///
+    /// The behaviour of dropping with uncommitted changes is implementation-defined.
     fn commit(&self) -> Result<(), Error>;
 }
 
+/// The interface for a directory opened from [`FileSystem`](trait.FileSystem.html).
 pub trait FileSystemDir {
+    /// The type of names the parent archive uses to name files and directories.
     type NameType;
+
+    /// The type of files the parent archive contains.
     type FileType;
 
+    /// Renames the file and/or move the file to a new parent directory.
     fn rename(&mut self, parent: &Self, name: Self::NameType) -> Result<(), Error>;
+
+    /// Returns the inode of the parent directory. If self is the root directory,
+    /// this returns 1 (i.e. the root directory itself).
     fn get_parent_ino(&self) -> Result<u32, Error>;
+
+    /// Returns the inode of this directory.
     fn get_ino(&self) -> u32;
+
+    /// Opens the sub directory with the specified name.
     fn open_sub_dir(&self, name: Self::NameType) -> Result<Self, Error>
     where
         Self: Sized;
+
+    /// Opens the sub file with the specified name.
     fn open_sub_file(&self, name: Self::NameType) -> Result<Self::FileType, Error>;
+
+    /// Lists all sub directories. The returned `Vec` contains tuples of names and inodes.
     fn list_sub_dir(&self) -> Result<Vec<(Self::NameType, u32)>, Error>;
+
+    /// Lists all sub files The returned `Vec` contains tuples of names and inodes.
     fn list_sub_file(&self) -> Result<Vec<(Self::NameType, u32)>, Error>;
+
+    /// Creates a new sub directory with the specified name, and opens it.
     fn new_sub_dir(&self, name: Self::NameType) -> Result<Self, Error>
     where
         Self: Sized;
+
+    /// Creates a new sub file with the specified name and initial length, and opens it.
     fn new_sub_file(&self, name: Self::NameType, len: usize) -> Result<Self::FileType, Error>;
+
+    /// Deletes this directory. The directory must contains no sub files or sub directories.
     fn delete(self) -> Result<(), Error>;
 }
 
+/// Describes the capacity of a [`FileSystem`](trait.FileSystem.html).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Stat {
+    /// Size in bytes of a block.
     pub block_len: usize,
+
+    /// Maximal number of blocks.
     pub total_blocks: usize,
+
+    /// Number of free blocks.
     pub free_blocks: usize,
+
+    /// Maximal number of file slots.
     pub total_files: usize,
+
+    /// Number of free file slots.
     pub free_files: usize,
+
+    /// Maximal number of directoy slots.
     pub total_dirs: usize,
+
+    /// Number of free directory slots.
     pub free_dirs: usize,
 }
 
+/// The common interface for a 3DS archive (save data, extdata, or title database).
+/// It supports inode-like file system operations.
 pub trait FileSystem {
+    /// The type of files this archive contains.
     type FileType: FileSystemFile<NameType = Self::NameType, DirType = Self::DirType>;
+
+    /// The type of directories this archive contains.
     type DirType: FileSystemDir<NameType = Self::NameType, FileType = Self::FileType>;
+
+    /// The type of names this archive uses to name files and directories.
     type NameType;
 
+    /// Opens the file with the specified inode.
     fn open_file(&self, ino: u32) -> Result<Self::FileType, Error>;
+
+    /// Opens the directory with the specified inode.
+    /// Inode 1 represents the root directory.
     fn open_dir(&self, ino: u32) -> Result<Self::DirType, Error>;
+
+    /// Synonym of `open_dir(1)`.
     fn open_root(&self) -> Result<Self::DirType, Error> {
         self.open_dir(1)
     }
+
+    /// Flushes all changes made to the archive.
+    /// The behaviour of dropping with uncommitted changes is implementation-defined.
     fn commit(&self) -> Result<(), Error>;
+
+    /// Returns the capacity information of the archive.
     fn stat(&self) -> Result<Stat, Error>;
 }
 
