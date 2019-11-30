@@ -106,17 +106,16 @@ mod test {
                 )),
             ];
             let init: Vec<u8> = rng.sample_iter(&Standard).take(len).collect();
-            let mut dual_file = DualFile::new(selector.clone(), pair.clone()).unwrap();
+            let dual_file = DualFile::new(selector.clone(), pair.clone()).unwrap();
             dual_file.write(0, &init).unwrap();
             let plain = MemoryFile::new(init);
 
             crate::random_access_file::fuzzer(
-                &mut dual_file,
+                dual_file,
                 |file| file,
                 |file| file.commit().unwrap(),
                 || DualFile::new(selector.clone(), pair.clone()).unwrap(),
-                &plain,
-                len,
+                plain,
             );
         }
     }

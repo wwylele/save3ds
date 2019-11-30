@@ -185,6 +185,14 @@ pub mod test {
 
     use crate::file_system::*;
 
+    /// Driver for fuzz test an implementation for `FileSystem`.
+    ///
+    /// - file_system: the implementation to test.
+    /// - max_dir: maximum number of directories allowed to create.
+    /// - max_file: maximum number of files allowed to create.
+    /// - reloader: method to create a new `FileSystem` of the same type for testing commit + drop + open.
+    /// - gen_name: method to generate a valid random file / directory name.
+    /// - gen_len: method to generate a valid random file length.
     pub fn fuzzer<T: FileSystem>(
         mut file_system: T,
         max_dir: usize,

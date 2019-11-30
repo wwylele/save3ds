@@ -276,17 +276,16 @@ mod test {
                 )),
             ];
             let init: Vec<u8> = rng.sample_iter(&Standard).take(len).collect();
-            let mut dpfs_level = DpfsLevel::new(selector.clone(), pair.clone(), block_len).unwrap();
+            let dpfs_level = DpfsLevel::new(selector.clone(), pair.clone(), block_len).unwrap();
             dpfs_level.write(0, &init).unwrap();
             let plain = MemoryFile::new(init);
 
             crate::random_access_file::fuzzer(
-                &mut dpfs_level,
+                dpfs_level,
                 |file| file,
                 |file| file.commit().unwrap(),
                 || DpfsLevel::new(selector.clone(), pair.clone(), block_len).unwrap(),
-                &plain,
-                len,
+                plain,
             );
         }
     }

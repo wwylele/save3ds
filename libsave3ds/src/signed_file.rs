@@ -6,6 +6,7 @@ use cmac::*;
 use sha2::*;
 use std::rc::Rc;
 
+/// Abstract interface for transforming the file data into a block ready for hash and CMAC.
 pub trait Signer {
     fn hash(&self, data: Vec<u8>) -> Vec<u8> {
         let mut hasher = Sha256::new();
@@ -15,11 +16,12 @@ pub trait Signer {
     fn block(&self, data: Vec<u8>) -> Vec<u8>;
 }
 
+/// Implements `RandomAccessFile` layer as a file with a AES-CMAC signature.
 pub struct SignedFile {
     signature: Rc<dyn RandomAccessFile>,
     data: Rc<dyn RandomAccessFile>,
-    block_provider: Box<dyn Signer>,
-    key: [u8; 16],
+    signer: Box<dyn Signer>,
+    key: [u8; 16], // AES-CMAC key
     len: usize,
 }
 
@@ -27,7 +29,7 @@ impl SignedFile {
     pub fn new_unverified(
         signature: Rc<dyn RandomAccessFile>,
         data: Rc<dyn RandomAccessFile>,
-        block_provider: Box<dyn Signer>,
+        signer: Box<dyn Signer>,
         key: [u8; 16],
     ) -> Result<SignedFile, Error> {
         if signature.len() != 16 {
@@ -37,7 +39,7 @@ impl SignedFile {
         let file = SignedFile {
             signature,
             data,
-            block_provider,
+            signer,
             key,
             len,
         };
@@ -47,7 +49,7 @@ impl SignedFile {
     pub fn new(
         signature: Rc<dyn RandomAccessFile>,
         data: Rc<dyn RandomAccessFile>,
-        block_provider: Box<dyn Signer>,
+        signer: Box<dyn Signer>,
         key: [u8; 16],
     ) -> Result<SignedFile, Error> {
         if signature.len() != 16 {
@@ -57,7 +59,7 @@ impl SignedFile {
         let file = SignedFile {
             signature,
             data,
-            block_provider,
+            signer,
             key,
             len,
         };
@@ -74,7 +76,7 @@ impl SignedFile {
     fn calculate_signature(&self) -> Result<[u8; 16], Error> {
         let mut data = vec![0; self.len];
         self.data.read(0, &mut data)?;
-        let hash = self.block_provider.hash(data);
+        let hash = self.signer.hash(data);
         let mut cmac: Cmac<Aes128> = Cmac::new(GenericArray::from_slice(&self.key));
         cmac.input(&hash);
         let mut result = [0; 16];
@@ -149,19 +151,18 @@ pub mod test {
             let data = Rc::new(MemoryFile::new(init));
             let signature = Rc::new(MemoryFile::new(cmac_result));
 
-            let mut file =
+            let file =
                 SignedFile::new(signature.clone(), data.clone(), signer.clone(), key).unwrap();
             let mut buf = vec![0; len];
             file.read(0, &mut buf).unwrap();
             let plain = MemoryFile::new(buf);
 
             crate::random_access_file::fuzzer(
-                &mut file,
+                file,
                 |file| file,
                 |file| file.commit().unwrap(),
                 || SignedFile::new(signature.clone(), data.clone(), signer.clone(), key).unwrap(),
-                &plain,
-                len,
+                plain,
             );
         }
     }

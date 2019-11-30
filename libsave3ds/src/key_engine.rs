@@ -1,3 +1,5 @@
+/// Emulates 3DS AES key scrambler engine.
+
 fn lrot128(a: [u8; 16], rot: usize) -> [u8; 16] {
     let mut out = [0; 16];
     let byte_shift = rot / 8;

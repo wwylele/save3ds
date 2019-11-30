@@ -2,6 +2,7 @@ use crate::error::*;
 use crate::random_access_file::*;
 use std::cell::RefCell;
 
+/// Implements `RandomAccessFile` as a simple Vec<u8>
 pub struct MemoryFile {
     data: RefCell<Vec<u8>>,
 }
@@ -13,6 +14,7 @@ impl MemoryFile {
         }
     }
 
+    /// Creates a `MemoryFile` that clones the content from another `RandomAccessFile`
     pub fn from_file(file: &dyn RandomAccessFile) -> Result<MemoryFile, Error> {
         let mut data = vec![0; file.len()];
         file.read(0, &mut data)?;

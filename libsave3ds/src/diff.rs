@@ -253,18 +253,17 @@ mod test {
             let parent = Rc::new(MemoryFile::new(vec![0; parent_len]));
 
             Diff::format(parent.clone(), Some((signer.clone(), key)), &param, 0).unwrap();
-            let mut diff = Diff::new(parent.clone(), Some((signer.clone(), key))).unwrap();
+            let diff = Diff::new(parent.clone(), Some((signer.clone(), key))).unwrap();
             let init: Vec<u8> = rng.sample_iter(&Standard).take(len).collect();
             diff.partition().write(0, &init).unwrap();
             let plain = MemoryFile::new(init);
 
             crate::random_access_file::fuzzer(
-                &mut diff,
+                diff,
                 |diff| diff.partition().as_ref(),
                 |diff| diff.commit().unwrap(),
                 || Diff::new(parent.clone(), Some((signer.clone(), key))).unwrap(),
-                &plain,
-                len,
+                plain,
             );
         }
     }

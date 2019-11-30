@@ -5,17 +5,23 @@ use sha2::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+// Values for block status
 const BLOCK_UNVERIFIED: u8 = 0;
 const BLOCK_VERIFIED: u8 = 1;
 const BLOCK_MODIFIED: u8 = 2;
 const BLOCK_BROKEN: u8 = 3;
 
+/// Implements `RandomAccessFile` layer for a IVFC level.
+///
+/// An IVFC level consists of a hash file and a data file as the underlying files.
+/// The data file is chunked into blocks. Each block is hashed using SHA-256 and the
+/// hash is recorded into the hash file.
 pub struct IvfcLevel {
     hash: Rc<dyn RandomAccessFile>,
     data: Rc<dyn RandomAccessFile>,
     block_len: usize,
     len: usize,
-    status: RefCell<Vec<u8>>,
+    status: RefCell<Vec<u8>>, // Array of u2. Status of each block.
 }
 
 impl IvfcLevel {
@@ -192,7 +198,7 @@ mod test {
             let data = Rc::new(MemoryFile::new(
                 rng.sample_iter(&Standard).take(len).collect(),
             ));
-            let mut ivfc_level = IvfcLevel::new(hash.clone(), data.clone(), block_len).unwrap();
+            let ivfc_level = IvfcLevel::new(hash.clone(), data.clone(), block_len).unwrap();
             let mut buf = vec![0; len];
             match ivfc_level.read(0, &mut buf) {
                 Err(Error::HashMismatch) => (),
@@ -203,12 +209,11 @@ mod test {
             let plain = MemoryFile::new(init);
 
             crate::random_access_file::fuzzer(
-                &mut ivfc_level,
+                ivfc_level,
                 |file| file,
                 |file| file.commit().unwrap(),
                 || IvfcLevel::new(hash.clone(), data.clone(), block_len).unwrap(),
-                &plain,
-                len,
+                plain,
             );
         }
     }

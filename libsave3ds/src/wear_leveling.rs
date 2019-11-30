@@ -548,21 +548,20 @@ pub mod test {
             let crc = crc16_ninty(&init).to_le_bytes().to_vec();
             let crc = Rc::new(MemoryFile::new(crc));
             let data = Rc::new(MemoryFile::new(init));
-            let mut file =
+            let file =
                 CrcFile::new(SimpleCrcStub::new(crc.clone()).unwrap(), data.clone(), true).unwrap();
             let mut buf = vec![0; len];
             file.read(0, &mut buf).unwrap();
             let plain = MemoryFile::new(buf);
             crate::random_access_file::fuzzer(
-                &mut file,
+                file,
                 |file| file,
                 |file| file.commit().unwrap(),
                 || {
                     CrcFile::new(SimpleCrcStub::new(crc.clone()).unwrap(), data.clone(), true)
                         .unwrap()
                 },
-                &plain,
-                len,
+                plain,
             );
         }
     }
@@ -577,18 +576,17 @@ pub mod test {
             let crc = vec![crc[0] ^ crc[1]];
             let crc = Rc::new(MemoryFile::new(crc));
             let data = Rc::new(MemoryFile::new(init));
-            let mut file =
+            let file =
                 CrcFile::new(XorCrcStub::new(crc.clone()).unwrap(), data.clone(), true).unwrap();
             let mut buf = vec![0; len];
             file.read(0, &mut buf).unwrap();
             let plain = MemoryFile::new(buf);
             crate::random_access_file::fuzzer(
-                &mut file,
+                file,
                 |file| file,
                 |file| file.commit().unwrap(),
                 || CrcFile::new(XorCrcStub::new(crc.clone()).unwrap(), data.clone(), true).unwrap(),
-                &plain,
-                len,
+                plain,
             );
         }
     }
@@ -602,17 +600,16 @@ pub mod test {
             let init1: Vec<u8> = init0.clone();
             let data0 = Rc::new(MemoryFile::new(init0));
             let data1 = Rc::new(MemoryFile::new(init1));
-            let mut file = MirroredFile::new(data0.clone(), data1.clone()).unwrap();
+            let file = MirroredFile::new(data0.clone(), data1.clone()).unwrap();
             let mut buf = vec![0; len];
             file.read(0, &mut buf).unwrap();
             let plain = MemoryFile::new(buf);
             crate::random_access_file::fuzzer(
-                &mut file,
+                file,
                 |file| file,
                 |file| file.commit().unwrap(),
                 || MirroredFile::new(data0.clone(), data1.clone()).unwrap(),
-                &plain,
-                len,
+                plain,
             );
         }
     }
@@ -652,14 +649,13 @@ pub mod test {
                 WearLeveling::format(init.clone()).unwrap();
             }
 
-            let mut file = WearLeveling::new(init.clone()).unwrap();
+            let file = WearLeveling::new(init.clone()).unwrap();
             crate::random_access_file::fuzzer(
-                &mut file,
+                file,
                 |file| file,
                 |file| file.commit().unwrap(),
                 || WearLeveling::new(init.clone()).unwrap(),
-                &plain,
-                len - 0x2000,
+                plain,
             );
         }
     }
@@ -698,14 +694,13 @@ pub mod test {
                 WearLeveling::format(init.clone()).unwrap();
             }
 
-            let mut file = WearLeveling::new(init.clone()).unwrap();
+            let file = WearLeveling::new(init.clone()).unwrap();
             crate::random_access_file::fuzzer(
-                &mut file,
+                file,
                 |file| file,
                 |file| file.commit().unwrap(),
                 || WearLeveling::new(init.clone()).unwrap(),
-                &plain,
-                len - 0x2000,
+                plain,
             );
         }
     }

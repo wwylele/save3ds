@@ -8,12 +8,13 @@ use lru::LruCache;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+/// Implements `RandomAccessFile` layer that does AES-128-CTR encryption
 pub struct AesCtrFile {
     data: Rc<dyn RandomAccessFile>,
     aes128: Aes128,
     ctr: [u8; 16],
     len: usize,
-    cache: RefCell<LruCache<usize, [u8; 16]>>,
+    cache: RefCell<LruCache<usize, [u8; 16]>>, // cache for recent XOR pads
     repeat_ctr: bool,
 }
 
@@ -26,6 +27,12 @@ fn seek_ctr(ctr: &mut [u8; 16], mut block_index: usize) {
 }
 
 impl AesCtrFile {
+    /// Creates a new `AesCtrFile`.
+    ///
+    /// - `data`: the underlying encrypted file.
+    /// - `key`: the 128-bit AES key.
+    /// - `ctr`: the 128-bit IV / CTR.
+    /// - `repeat_ctr`: whether to emulate a 3DS bug where CTR is reused every 512 bytes.
     pub fn new(
         data: Rc<dyn RandomAccessFile>,
         key: [u8; 16],
@@ -44,6 +51,7 @@ impl AesCtrFile {
         }
     }
 
+    /// Get the XOR pad for the specified block.
     fn get_pad(&self, mut block_index: usize) -> [u8; 16] {
         if self.repeat_ctr {
             block_index /= 0x20;
@@ -148,18 +156,17 @@ mod test {
             let key: [u8; 16] = rng.gen();
             let ctr: [u8; 16] = rng.gen();
             let repeat_ctr = rng.gen();
-            let mut aes_ctr_file = AesCtrFile::new(data.clone(), key, ctr, repeat_ctr);
+            let aes_ctr_file = AesCtrFile::new(data.clone(), key, ctr, repeat_ctr);
             let mut init: Vec<u8> = vec![0; len];
             aes_ctr_file.read(0, &mut init).unwrap();
             let plain = MemoryFile::new(init);
 
             crate::random_access_file::fuzzer(
-                &mut aes_ctr_file,
+                aes_ctr_file,
                 |aes_ctr_file| aes_ctr_file,
                 |aes_ctr_file| aes_ctr_file.commit().unwrap(),
                 || AesCtrFile::new(data.clone(), key, ctr, repeat_ctr),
-                &plain,
-                len,
+                plain,
             );
         }
     }

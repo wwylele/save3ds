@@ -315,7 +315,7 @@ mod test {
         signer: Option<(Box<SimpleSigner>, [u8; 16])>,
     ) {
         let rng = rand::thread_rng();
-        let mut disa = Disa::new(
+        let disa = Disa::new(
             raw_file.clone(),
             signer
                 .as_ref()
@@ -329,7 +329,7 @@ mod test {
         let plain = MemoryFile::new(init);
 
         crate::random_access_file::fuzzer(
-            &mut disa,
+            disa,
             |disa| disa[partition_index].as_ref(),
             |disa| disa.commit().unwrap(),
             || {
@@ -341,8 +341,7 @@ mod test {
                 )
                 .unwrap()
             },
-            &plain,
-            len,
+            plain,
         );
     }
 
@@ -380,5 +379,4 @@ mod test {
             fuzz_one_file(outer, 1, Some((signer.clone(), key)));
         }
     }
-
 }

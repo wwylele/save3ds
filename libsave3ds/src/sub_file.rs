@@ -2,6 +2,7 @@ use crate::error::*;
 use crate::random_access_file::*;
 use std::rc::Rc;
 
+/// Implements `RandomAccessFile` layer as a sub region of a parent file.
 pub struct SubFile {
     parent: Rc<dyn RandomAccessFile>,
     begin: usize,

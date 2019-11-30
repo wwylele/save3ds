@@ -484,20 +484,18 @@ mod test {
             let partition = Rc::new(MemoryFile::new(vec![0; partition_len]));
 
             DifiPartition::format(descriptor.as_ref(), &param).unwrap();
-            let mut difi = DifiPartition::new(descriptor.clone(), partition.clone()).unwrap();
+            let difi = DifiPartition::new(descriptor.clone(), partition.clone()).unwrap();
             let init: Vec<u8> = rng.sample_iter(&Standard).take(len).collect();
             difi.write(0, &init).unwrap();
             let plain = MemoryFile::new(init);
 
             crate::random_access_file::fuzzer(
-                &mut difi,
+                difi,
                 |file| file,
                 |file| file.commit().unwrap(),
                 || DifiPartition::new(descriptor.clone(), partition.clone()).unwrap(),
-                &plain,
-                len,
+                plain,
             );
         }
     }
-
 }
