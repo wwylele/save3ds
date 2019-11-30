@@ -2,6 +2,7 @@ use crate::error::*;
 use crate::misc::*;
 use crate::random_access_file::*;
 use byte_struct::*;
+use log::*;
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -53,6 +54,7 @@ fn index_good_to_bad(index: Option<usize>) -> u32 {
 fn get_node(table: &dyn RandomAccessFile, index: usize) -> Result<Node, Error> {
     let node_start: Entry = read_struct(table, (index + 1) * Entry::BYTE_LEN)?;
     if (node_start.u.flag == 1) != (node_start.u.index == 0) {
+        error!("Node has broken entry");
         return make_error(Error::BrokenFat);
     }
 
@@ -64,6 +66,7 @@ fn get_node(table: &dyn RandomAccessFile, index: usize) -> Result<Node, Error> {
             || expand_start.v.flag == 1
             || expand_start.u.index as usize != index + 1
         {
+            error!("Expanded node has broken starting entry");
             return make_error(Error::BrokenFat);
         }
 
@@ -71,6 +74,7 @@ fn get_node(table: &dyn RandomAccessFile, index: usize) -> Result<Node, Error> {
         let expand_end: Entry = read_struct(table, end_i * Entry::BYTE_LEN)?;
 
         if expand_start != expand_end {
+            error!("Expanded node has broken end entry");
             return make_error(Error::BrokenFat);
         }
         (expand_start.v.index - expand_start.u.index + 1) as usize
@@ -119,6 +123,7 @@ fn set_node(table: &dyn RandomAccessFile, index: usize, node: Node) -> Result<()
 fn get_head(table: &dyn RandomAccessFile) -> Result<Option<usize>, Error> {
     let head: Entry = read_struct(table, 0)?;
     if head.u.index != 0 || head.u.flag != 0 || head.v.flag != 0 {
+        error!("FAT has broken head");
         return make_error(Error::BrokenFat);
     }
     Ok(index_bad_to_good(head.v.index))
@@ -203,6 +208,7 @@ fn allocate(table: &dyn RandomAccessFile, mut block_count: usize) -> Result<Vec<
             if let Some(next) = node.next {
                 let mut next_node = get_node(table, next)?;
                 if next_node.prev != Some(cur) {
+                    error!("FAT has less space than it should");
                     return make_error(Error::BrokenFat);
                 }
                 next_node.prev = Some(cur + block_count);
@@ -226,7 +232,7 @@ fn allocate(table: &dyn RandomAccessFile, mut block_count: usize) -> Result<Vec<
     Ok(block_list)
 }
 
-// Takes some blocks from free blocks.
+// Frees a block list.
 // Precondition: the first node has prev=None, block_list contain well-formed node.
 // Remember to modify the first node if this list is split from a larger list!
 fn free(table: &dyn RandomAccessFile, block_list: &[BlockMap]) -> Result<(), Error> {
@@ -235,6 +241,7 @@ fn free(table: &dyn RandomAccessFile, block_list: &[BlockMap]) -> Result<(), Err
     if let Some(free_front_index) = maybe_free_front_index {
         let mut free_front = get_node(table, free_front_index)?;
         if free_front.prev.is_some() {
+            error!("Trying to free a block list from middle");
             return make_error(Error::BrokenFat);
         }
         free_front.prev = Some(last_node_index);
@@ -243,6 +250,7 @@ fn free(table: &dyn RandomAccessFile, block_list: &[BlockMap]) -> Result<(), Err
 
     let mut last_node = get_node(table, last_node_index)?;
     if last_node.next.is_some() {
+        error!("Trying to free a block list that ends too early");
         return make_error(Error::BrokenFat);
     }
     last_node.next = maybe_free_front_index;
@@ -262,7 +270,7 @@ fn iterate_fat_entry(
     while let Some(cur) = cur_entry {
         let node = get_node(table, cur)?;
         if node.prev != prev {
-            assert_eq!(node.prev, prev);
+            error!("Inconsistent prev pointer detected while iterating");
             return make_error(Error::BrokenFat);
         }
 
@@ -449,6 +457,7 @@ impl FatFile {
                 if let Some(next_index) = next {
                     let mut next = get_node(table, next_index)?;
                     if next.prev != Some(tail_index) {
+                        error!("Inconsistent prev pointer detected while resizing");
                         return make_error(Error::BrokenFat);
                     }
                     next.prev = Some(head_index);
@@ -652,5 +661,4 @@ mod test {
             }
         }
     }
-
 }

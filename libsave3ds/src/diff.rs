@@ -7,6 +7,7 @@ use crate::random_access_file::*;
 use crate::signed_file::*;
 use crate::sub_file::SubFile;
 use byte_struct::*;
+use log::*;
 use std::rc::Rc;
 
 #[derive(ByteStruct)]
@@ -136,6 +137,10 @@ impl Diff {
 
         let header: DiffHeader = read_struct(header_file.as_ref(), 0)?;
         if header.magic != *b"DIFF" || header.version != 0x30000 {
+            error!(
+                "Unexpected DIFF magic {:?} {:X}",
+                header.magic, header.version
+            );
             return make_error(Error::MagicMismatch);
         }
 

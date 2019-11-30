@@ -1229,6 +1229,7 @@ fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
     opts.optopt("", "sdext", "mount the SD Extdata with the ID", "ID");
     opts.optopt("", "sdsave", "mount the SD save with the ID", "ID");
     opts.optflag("t", "touch", "just try opening and closing the archive");
+    opts.optflagmulti("v", "verbose", "more v for more verbose logging");
 
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
@@ -1238,6 +1239,13 @@ fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
             return Ok(());
         }
     };
+
+    let verbose = matches.opt_count("verbose");
+    stderrlog::new()
+        .module(module_path!())
+        .module("libsave3ds")
+        .verbosity(verbose)
+        .init()?;
 
     if matches.opt_present("h") {
         print_usage(&program, opts);

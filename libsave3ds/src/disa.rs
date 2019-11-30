@@ -7,6 +7,7 @@ use crate::random_access_file::*;
 use crate::signed_file::*;
 use crate::sub_file::SubFile;
 use byte_struct::*;
+use log::*;
 use std::ops::Index;
 use std::rc::Rc;
 
@@ -219,9 +220,14 @@ impl Disa {
 
         let header: DisaHeader = read_struct(header_file.as_ref(), 0)?;
         if header.magic != *b"DISA" || header.version != 0x40000 {
+            error!(
+                "Unexpected DISA magic {:?} {:X}",
+                header.magic, header.version
+            );
             return make_error(Error::MagicMismatch);
         }
         if header.partition_count != 1 && header.partition_count != 2 {
+            error!("Unexpected partition_count {}", header.partition_count);
             return make_error(Error::InvalidValue);
         }
 

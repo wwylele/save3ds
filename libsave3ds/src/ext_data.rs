@@ -11,6 +11,7 @@ use crate::sd_nand_common::*;
 use crate::signed_file::*;
 use crate::sub_file::SubFile;
 use byte_struct::*;
+use log::*;
 use std::rc::Rc;
 
 #[derive(ByteStruct, Clone)]
@@ -381,6 +382,10 @@ impl ExtData {
 
         let header: ExtHeader = read_struct(meta_file.partition().as_ref(), 0)?;
         if header.magic != *b"VSXE" || header.version != 0x30000 {
+            error!(
+                "Unexpected VSXE magic {:?} {:X}",
+                header.magic, header.version
+            );
             return make_error(Error::MagicMismatch);
         }
         let fs_info: FsInfo = read_struct(
@@ -388,6 +393,10 @@ impl ExtData {
             header.fs_info_offset as usize,
         )?;
         if fs_info.data_block_count != fs_info.fat_size {
+            error!(
+                "Unexpected data_block_count={}, fat_size={}",
+                fs_info.data_block_count, fs_info.fat_size
+            );
             return make_error(Error::SizeMismatch);
         }
 
@@ -531,6 +540,7 @@ impl File {
 
         let info = meta.get_info()?;
         if data.is_some() && info.unique_id != data.as_ref().unwrap().unique_id() {
+            error!("Unique ID mismatch");
             return make_error(Error::UniqueIdMismatch);
         }
         Ok(File { center, meta, data })

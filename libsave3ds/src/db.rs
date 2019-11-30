@@ -8,6 +8,7 @@ use crate::random_access_file::*;
 use crate::signed_file::*;
 use crate::sub_file::SubFile;
 use byte_struct::*;
+use log::*;
 use std::rc::Rc;
 
 #[derive(ByteStruct, Clone, PartialEq)]
@@ -213,6 +214,7 @@ impl Db {
             let mut magic = [0; 4];
             diff.partition().read(0, &mut magic)?;
             if magic != *b"TICK" {
+                error!("Unexpected TICK magic {:?}", magic);
                 return make_error(Error::MagicMismatch);
             }
         } else {
@@ -229,6 +231,7 @@ impl Db {
                     _ => unreachable!(),
                 }
             {
+                error!("Unexpected database magic {:?}", magic);
                 return make_error(Error::MagicMismatch);
             }
         }
@@ -241,10 +244,15 @@ impl Db {
 
         let header: DbHeader = read_struct(without_pre.as_ref(), 0)?;
         if header.magic != *b"BDRI" || header.version != 0x30000 {
+            error!("Unexpected magic {:?} {:X}", header.magic, header.version);
             return make_error(Error::MagicMismatch);
         }
         let fs_info: FsInfo = read_struct(without_pre.as_ref(), header.fs_info_offset as usize)?;
         if fs_info.data_block_count != fs_info.fat_size {
+            error!(
+                "Unexpected data_block_count={}, fat_size={}",
+                fs_info.data_block_count, fs_info.fat_size
+            );
             return make_error(Error::SizeMismatch);
         }
 
@@ -275,7 +283,7 @@ impl Db {
             0
         };
 
-        println!("Database file end fixup: 0x{:x}", data_delta);
+        info!("Database file end fixup: 0x{:x}", data_delta);
 
         let data: Rc<dyn RandomAccessFile> = Rc::new(FakeSizeFile {
             parent: Rc::new(SubFile::new(
@@ -326,12 +334,14 @@ impl File {
         let len = info.size as usize;
         let data = if info.block == 0x8000_0000 {
             if len != 0 {
+                error!("Non-empty file with invalid pointer");
                 return make_error(Error::SizeMismatch);
             }
             None
         } else {
             let fat_file = FatFile::open(center.fat.clone(), info.block as usize)?;
             if len == 0 || len > fat_file.len() {
+                error!("Empty file with valid pointer");
                 return make_error(Error::SizeMismatch);
             }
             Some(fat_file)

@@ -1,3 +1,4 @@
+use log::*;
 use std::fmt;
 
 #[derive(Debug)]
@@ -75,14 +76,12 @@ impl std::error::Error for Error {}
 
 impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Error {
-        {
-            println!("Host IO error: {:?}", e);
-        }
+        error!("Host IO error: {:?}", e);
         Error::IO(e)
     }
 }
 
 pub(crate) fn make_error<T>(e: Error) -> Result<T, Error> {
-    // println!("Error thrown: {:?}", e);
+    info!("Error thrown: {:?}", e);
     Err(e)
 }

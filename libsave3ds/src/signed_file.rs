@@ -3,6 +3,7 @@ use crate::random_access_file::*;
 use aes::*;
 use cmac::crypto_mac::generic_array::*;
 use cmac::*;
+use log::*;
 use sha2::*;
 use std::rc::Rc;
 
@@ -67,6 +68,7 @@ impl SignedFile {
         let mut signature = [0; 16];
         file.signature.read(0, &mut signature)?;
         if signature != file.calculate_signature()? {
+            error!("Signature mismatch");
             return make_error(Error::SignatureMismatch);
         }
 

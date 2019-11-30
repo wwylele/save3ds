@@ -6,6 +6,7 @@ use crate::misc::*;
 use crate::random_access_file::*;
 use crate::sub_file::SubFile;
 use byte_struct::*;
+use log::*;
 use std::rc::Rc;
 
 #[derive(ByteStruct)]
@@ -291,27 +292,45 @@ impl DifiPartition {
         let header: DifiHeader = read_struct(descriptor.as_ref(), 0)?;
 
         if header.magic != *b"DIFI" || header.version != 0x10000 {
+            error!(
+                "Unexpected DIFI magic {:?} {:X}",
+                header.magic, header.version
+            );
             return make_error(Error::MagicMismatch);
         }
 
         if header.ivfc_descriptor_size as usize != IvfcDescriptor::BYTE_LEN {
+            error!(
+                "Unexpected ivfc_descriptor_size {}",
+                header.ivfc_descriptor_size
+            );
             return make_error(Error::SizeMismatch);
         }
         let ivfc: IvfcDescriptor =
             read_struct(descriptor.as_ref(), header.ivfc_descriptor_offset as usize)?;
         if ivfc.magic != *b"IVFC" || ivfc.version != 0x20000 {
+            error!("Unexpected IVFC magic {:?} {:X}", ivfc.magic, ivfc.version);
             return make_error(Error::MagicMismatch);
         }
         if header.partition_hash_size != ivfc.master_hash_size {
+            error!(
+                "Unexpected partition_hash_size {}",
+                header.partition_hash_size
+            );
             return make_error(Error::SizeMismatch);
         }
 
         if header.dpfs_descriptor_size as usize != DpfsDescriptor::BYTE_LEN {
+            error!(
+                "Unexpected dpfs_descriptor_size {}",
+                header.dpfs_descriptor_size
+            );
             return make_error(Error::SizeMismatch);
         }
         let dpfs: DpfsDescriptor =
             read_struct(descriptor.as_ref(), header.dpfs_descriptor_offset as usize)?;
         if dpfs.magic != *b"DPFS" || dpfs.version != 0x10000 {
+            error!("Unexpected DPFS magic {:?} {:X}", dpfs.magic, dpfs.version);
             return make_error(Error::MagicMismatch);
         }
 

@@ -10,6 +10,7 @@ use crate::save_ext_common::*;
 use crate::signed_file::*;
 use crate::sub_file::SubFile;
 use byte_struct::*;
+use log::*;
 use std::rc::Rc;
 
 #[derive(ByteStruct, Clone)]
@@ -424,10 +425,18 @@ impl SaveData {
         let disa = Rc::new(Disa::new(file, SaveData::get_signer(save_data_type))?);
         let header: SaveHeader = read_struct(disa[0].as_ref(), 0)?;
         if header.magic != *b"SAVE" || header.version != 0x40000 {
+            error!(
+                "Unexpected SAVE magic {:?} {:X}",
+                header.magic, header.version
+            );
             return make_error(Error::MagicMismatch);
         }
         let fs_info: FsInfo = read_struct(disa[0].as_ref(), header.fs_info_offset as usize)?;
         if fs_info.data_block_count != fs_info.fat_size {
+            error!(
+                "Unexpected data_block_count={}, fat_size={}",
+                fs_info.data_block_count, fs_info.fat_size
+            );
             return make_error(Error::SizeMismatch);
         }
 
@@ -511,12 +520,14 @@ impl File {
         let len = info.size as usize;
         let data = if info.block == 0x8000_0000 {
             if len != 0 {
+                error!("Non-empty file with invalid pointer");
                 return make_error(Error::SizeMismatch);
             }
             None
         } else {
             let fat_file = FatFile::open(center.fat.clone(), info.block as usize)?;
             if len == 0 || len > fat_file.len() {
+                error!("Empty file with valid pointer");
                 return make_error(Error::SizeMismatch);
             }
             Some(fat_file)
