@@ -1242,13 +1242,13 @@ fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
     opts.optopt(
         "",
         "key19x",
-        "AES slot 0x19 key X for decrypting New3DS cartridge save",
+        "AES slot 0x19 key X for decrypting New3DS exclusive cartridge save",
         "HEX|FILE",
     );
     opts.optopt(
         "",
         "key1ax",
-        "AES slot 0x19 key X for decrypting New3DS cartridge save",
+        "AES slot 0x19 key X for decrypting New3DS exclusive cartridge save",
         "HEX|FILE",
     );
     opts.optopt("m", "movable", "movable.sed file path", "FILE");

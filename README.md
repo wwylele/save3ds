@@ -4,16 +4,13 @@
 
 Extract, import and FUSE program for common save format for 3DS, written in rust.
 
-This project, along with documentation, is still WIP. There are two main components in the project: the library `libsave3ds`, and the FUSE program + extract/import tool `save3ds_fuse` that builds on top of it. The FUSE feature is not available on Windows.
+There are two main components in the project: the library `libsave3ds`, and the FUSE program + extract/import tool `save3ds_fuse` that builds on top of it. The FUSE feature is not available on Windows.
 
 Both the library and the program currently supports the following operations:
- - Full filesystem operation on save data and extdata stored on NAND, on SD or standalone
+ - Full filesystem operation on save data and extdata stored on NAND, on SD, on cartridge or standalone
  - Editing title database and tickets
 
 Note that the supported NAND format is in unpacked cleartext filesystem. If you want to read/write on the original NAND FAT image, you need to use other tools to extract the NAND data, or map another layer of virtual filesystem (e.g. https://github.com/ihaveamac/ninfs)
-
-TODO:
- - Complete cartridge save data support
 
 ## Build
 
@@ -86,6 +83,8 @@ You can put options in arbitrary order. The detail description of them are:
  - `--game FILE`: the game dumped from the cartridge in CCI format, required by cartridge save
  - `--priv FILE`: the private header dumped from the cartrdige, required by cartridge save
  - `--key FILE|HEX`: AES slot 0x2F key Y for decrypting v6.0 cartridge save
+ - `--key19x FILE|HEX`: AES slot 0x19 key X for decrypting New3DS exclusive cartridge save
+ - `--key1ax FILE|HEX`: AES slot 0x1A key X for decrypting New3DS exclusive cartridge save
 
 `FORMAT_PARAM` is an optional group of options in the form of `--format param1:value1,param2:value2,...`, used in conjuntion with mount mode or import mode. When the flag `--format` presents, the archive will be formatted using the given parameters before mounting/importing. This is useful for creating a completely new archives. If an archive already exists in the place, it will be deleted. The difference between `--import` and `--import --format` is that, although both clearing the content, `--import` retains the archive layout and capacity that depends on the formatting parameters, while the addition `--format` flag can change the layout and capacity.
 
@@ -145,6 +144,9 @@ Save data and extdata support 16-byte directory / file name, interpreted in ASCI
 Prohibited characters specific to Windows are not taken care of. They are usually not used in games, but if they are unfortunately used, the program will likely crash / error out.
 
 Files in title database archives are named with title ID in 16-digit hex. File names that contains non-hex characters or that is too long are rejected.
+
+### Cartridge save wear leveling
+The exact mechanism of Card1 wear leveling is unclear yet. When writing a Card1 cartridge save data, save3ds will simply clear the journal and flush everything into the block map, without updating the allocation count or the two unknown integers at the beginning. 3DS seems fine with this in my test, but it might cause unexpected things.
 
 ### Extdata file size
 
