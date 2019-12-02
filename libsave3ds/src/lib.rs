@@ -61,6 +61,8 @@ pub struct Resource {
     cart_id_long: Option<[u8; 0x40]>,
     game_path: Option<String>,
     x2f_key_y: Option<[u8; 16]>,
+    x19_key_x: Option<[u8; 16]>,
+    x1a_key_x: Option<[u8; 16]>,
 }
 
 impl Resource {
@@ -75,6 +77,8 @@ impl Resource {
     /// - `priv_path`: the path to the private header of the cartridge.
     /// - `game_path`: the path to the game image of the cartridge.
     /// - `x2f_key_y`: key Y of AES engine slot 0x2F.
+    /// - `x19_key_x`: key X of AES engine slot 0x19.
+    /// - `x1a_key_x`: key X of AES engine slot 0x1A.
     pub fn new(
         boot9_path: Option<String>,
         movable_path: Option<String>,
@@ -84,6 +88,8 @@ impl Resource {
         priv_path: Option<String>,
         game_path: Option<String>,
         x2f_key_y: Option<[u8; 16]>,
+        x19_key_x: Option<[u8; 16]>,
+        x1a_key_x: Option<[u8; 16]>,
     ) -> Result<Resource, Error> {
         let (key_x_ncch, key_x_sign, key_x_dec, key_otp, iv_otp, otp_salt, key_y_db) =
             if let Some(boot9) = boot9_path {
@@ -232,6 +238,8 @@ impl Resource {
             cart_id_long,
             game_path,
             x2f_key_y,
+            x19_key_x,
+            x1a_key_x,
         })
     }
 
@@ -536,7 +544,8 @@ impl Resource {
                 key_y[..].copy_from_slice(&key_y_block[..]);
                 repeat_ctr = true;
             }
-            2 => {
+            2 | 9 => {
+                // TODO: version 9 is unverified yet
                 let mut key_y_block = vec![];
                 key_y_block.extend_from_slice(&exheader_signature);
                 key_y_block.extend_from_slice(&self.cart_id_long.ok_or(Error::MissingPriv)?);
@@ -570,12 +579,23 @@ impl Resource {
                 cmac.input(&hash);
                 key_y[..].copy_from_slice(cmac.result().code().as_slice());
             }
-            // TODO: version 9
             _ => return Err(Error::Unsupported),
         }
 
-        let key = key_engine::scramble(self.key_x_dec.ok_or(Error::MissingBoot9)?, key_y);
-        let key_cmac = key_engine::scramble(self.key_x_sign.ok_or(Error::MissingBoot9)?, key_y);
+        let key_x = if crypto_version == 9 {
+            self.x1a_key_x.ok_or(Error::MissingKeyX1A)?
+        } else {
+            self.key_x_dec.ok_or(Error::MissingBoot9)?
+        };
+
+        let key_x_cmac = if crypto_version == 9 {
+            self.x19_key_x.ok_or(Error::MissingKeyX19)?
+        } else {
+            self.key_x_sign.ok_or(Error::MissingBoot9)?
+        };
+
+        let key = key_engine::scramble(key_x, key_y);
+        let key_cmac = key_engine::scramble(key_x_cmac, key_y);
         Ok(CartFormat {
             wear_leveling,
             key,

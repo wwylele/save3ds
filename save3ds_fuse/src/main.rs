@@ -1187,6 +1187,27 @@ fn to_save_data_format_param(
     ))
 }
 
+fn read_key(s: String) -> std::io::Result<[u8; 16]> {
+    let mut key = [0; 16];
+    if s.len() == 32 {
+        let mut success = true;
+        for i in 0..16 {
+            if let Ok(v) = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16) {
+                key[i] = v;
+            } else {
+                success = false;
+                break;
+            }
+        }
+        if success {
+            return Ok(key);
+        }
+    }
+    let mut file = std::fs::File::open(s)?;
+    file.read_exact(&mut key)?;
+    Ok(key)
+}
+
 fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     let program = args[0].clone();
@@ -1216,6 +1237,18 @@ fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
         "k",
         "key",
         "AES slot 0x2F key Y for decrypting v6.0 cartridge save",
+        "HEX|FILE",
+    );
+    opts.optopt(
+        "",
+        "key19x",
+        "AES slot 0x19 key X for decrypting New3DS cartridge save",
+        "HEX|FILE",
+    );
+    opts.optopt(
+        "",
+        "key1ax",
+        "AES slot 0x19 key X for decrypting New3DS cartridge save",
         "HEX|FILE",
     );
     opts.optopt("m", "movable", "movable.sed file path", "FILE");
@@ -1303,29 +1336,12 @@ fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
     let priv_path = matches.opt_str("priv");
     let game_path = matches.opt_str("game");
     let x2f_key_y = matches.opt_str("key");
+    let x19_key_x = matches.opt_str("key19x");
+    let x1a_key_x = matches.opt_str("key1ax");
 
-    let x2f_key_y = x2f_key_y
-        .map(|s| -> std::io::Result<_> {
-            let mut key = [0; 16];
-            if s.len() == 32 {
-                let mut success = true;
-                for i in 0..16 {
-                    if let Ok(v) = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16) {
-                        key[i] = v;
-                    } else {
-                        success = false;
-                        break;
-                    }
-                }
-                if success {
-                    return Ok(key);
-                }
-            }
-            let mut file = std::fs::File::open(s)?;
-            file.read_exact(&mut key)?;
-            Ok(key)
-        })
-        .transpose()?;
+    let x2f_key_y = x2f_key_y.map(read_key).transpose()?;
+    let x19_key_x = x19_key_x.map(read_key).transpose()?;
+    let x1a_key_x = x1a_key_x.map(read_key).transpose()?;
 
     let format_param: Option<HashMap<String, String>> = format_param.map(|s| {
         s.split(',')
@@ -1370,6 +1386,8 @@ fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
         priv_path,
         game_path,
         x2f_key_y,
+        x19_key_x,
+        x1a_key_x,
     )?;
 
     if let Some(bare) = bare_path {
