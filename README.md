@@ -63,13 +63,13 @@ You can put options in arbitrary order. The detail description of them are:
    - `sdtitle` refers to the file `SDMC:/Nintendo 3DS/<ID0>/<ID1>/dbs/title.db`
    - `sdimport` refers to the file `SDMC:/Nintendo 3DS/<ID0>/<ID1>/dbs/import.db`
    - `ticket` refers to the file `NAND:/dbs/ticket.db`
- - `--cart FILE`: (experimental) a cartridge save data file with path `FILE`. Currently only support Card1, non-N3DS-exclusive, and read-only (needs `--readonly` for mounting).
+ - `--cart FILE`:a cartridge save data file with path `FILE`.
 
 `MOUNT_PATH` is a directory to mount/extract/import the archive content
 
 `MODE` specifies the operation mode on the archive. It can be one of the following:
  - mount mode (default). Mount the archive to `MOUNT_PATH` as a virtual filesystem, allowing browsing and editing the content. Upon unmounting, the program saves the modification. This mode is not supported on Windows.
-   - with additional flag `--readonly`, the program opens the archive in read-only mode, prevents any modification operation and skips the saving at the end.
+   - with additional flag `--readonly`, the program opens the archive in read-only mode and prevents any modification.
  - extract mode (`--extract`). Extracts all content of the archive to `MOUNT_PATH`.
  - import mode (`--import`). Clear the content of the archive, and import the content from `MOUNT_PATH`.
  - touch mode (`--touch`). Just open and close the archive. Useful for testing the correctness of other specified resources. No need to specify `MOUNT_PATH` in this mode.
@@ -91,7 +91,7 @@ You can put options in arbitrary order. The detail description of them are:
 The parameters supported by `--format` are
  - `max_dir`/`max_file`: the maximum number of directories/files. The default is `100`
  - `dir_buckets`/`file_buckets`: the bucket count of the hash table for directories/files. The default value is calculated from `max_dir`/`max_file` using the common algorithm games use.
- - `len`: only for save data archive. Limits the physical size in bytes of the save data file. The defualt is `524288` (512 KiB). For Card1 cartridge save, only `131072` (128 KiB), `524288` (512 KiB), and `1048576` (1 MiB) are allowed, are must match the cartidge chip type.
+ - `len`: only for save data archive. Limits the physical size in bytes of the save data file. The defualt is `524288` (512 KiB). For Card1 cartridge save, only `131072` (128 KiB), `524288` (512 KiB), and `1048576` (1 MiB) are allowed, and must match the cartidge chip type.
  - `block_len`: only for save data archive. The value can only be `512` or `4096`. The default is `512` for `--sdsave`, `--bare` and, `--cart`, and `4096` for `--nandsave`.
  - `duplicate_data`: only for save data archive. The value can only be `true` or `false`. The default is `true`
 
@@ -119,9 +119,9 @@ save3ds_fuse \
     # This is necessary for decryption & signing.
     --boot9 /home/wwylele/3dsbootrom/boot9.bin \
 
-    # Informs the program that we want to mount
+    # Informs the program that we want to mount.
     # the SD save data with title ID 0004000000164800 (Pokemon Sun).
-    # The ID is a 16-digit hex number
+    # The ID is a 16-digit hex number.
     --sdsave 0004000000164800 \
 
     # The target path. The directory must exist and be empty.
