@@ -54,7 +54,7 @@ impl AesCtrFile {
     /// Get the XOR pad for the specified block.
     fn get_pad(&self, mut block_index: usize) -> [u8; 16] {
         if self.repeat_ctr {
-            block_index /= 0x20;
+            block_index %= 0x20;
         }
         let mut cache = self.cache.borrow_mut();
         if let Some(cached) = cache.get(&block_index) {
