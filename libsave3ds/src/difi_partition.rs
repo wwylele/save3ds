@@ -194,7 +194,7 @@ impl DifiPartition {
         };
 
         fn ilog(block_len: usize) -> u32 {
-            ((std::mem::size_of::<usize>() * 8) as u32 - block_len.leading_zeros() - 1)
+            (std::mem::size_of::<usize>() * 8) as u32 - block_len.leading_zeros() - 1
         }
 
         let dpfs_descriptor = DpfsDescriptor {
