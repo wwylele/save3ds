@@ -3,6 +3,10 @@ use crate::random_access_file::*;
 use std::cell::Cell;
 use std::rc::Rc;
 
+/// Implements `RandomAccessFile` layer for a dual-image file.
+///
+/// Only one of the two images is active, which is indicated by another one-byte file.
+/// `DualFile` can be viewed as a special case of `DpdsLevel` which has `block_len = file.len()`.
 pub struct DualFile {
     selector: Rc<dyn RandomAccessFile>,
     pair: [Rc<dyn RandomAccessFile>; 2],

@@ -535,7 +535,6 @@ impl Resource {
         let mut repeat_ctr = false;
         match crypto_version {
             0 => {
-                // TODO: version 0 is unverified yet
                 let mut key_y_block = vec![];
                 key_y_block.extend_from_slice(&exheader_signature);
                 key_y_block.extend_from_slice(&self.cart_id_short.ok_or(Error::MissingPriv)?);

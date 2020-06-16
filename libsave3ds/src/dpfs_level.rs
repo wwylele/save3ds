@@ -4,13 +4,6 @@ use crate::random_access_file::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-pub struct DpfsLevel {
-    selector: Rc<dyn RandomAccessFile>,
-    pair: [Rc<dyn RandomAccessFile>; 2],
-    block_len: usize,
-    len: usize,
-    dirty: RefCell<Vec<u32>>,
-}
 /// Implements `RandomAccessFile` layer for a DPFS level.
 ///
 /// A DPFS level consists of a selector file and two data files. For each data block, one of the
@@ -19,6 +12,14 @@ pub struct DpfsLevel {
 /// file, and then flip the bit in the selector to commit the change.
 ///
 /// The bit string in the selector file is grouped into 32-bit little endian and MSB-first integers.
+pub struct DpfsLevel {
+    selector: Rc<dyn RandomAccessFile>,
+    pair: [Rc<dyn RandomAccessFile>; 2],
+    block_len: usize,
+    len: usize,
+    dirty: RefCell<Vec<u32>>,
+}
+
 impl DpfsLevel {
     pub fn new(
         selector: Rc<dyn RandomAccessFile>,
