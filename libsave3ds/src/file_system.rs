@@ -546,14 +546,19 @@ pub mod test {
                                     assert!(stat.free_blocks < block - old_block);
                                 }
                                 Ok(()) => {
-                                    if len < old_len {
-                                        file_mirrors[file_index].data.truncate(len);
-                                    } else if len > old_len {
-                                        let delta = len - old_len;
-                                        let mut init: Vec<u8> =
-                                            rng.sample_iter(&Standard).take(delta).collect();
-                                        file.write(old_len, &init).unwrap();
-                                        file_mirrors[file_index].data.append(&mut init);
+                                    use std::cmp::Ordering;
+                                    match len.cmp(&old_len) {
+                                        Ordering::Less => {
+                                            file_mirrors[file_index].data.truncate(len)
+                                        }
+                                        Ordering::Greater => {
+                                            let delta = len - old_len;
+                                            let mut init: Vec<u8> =
+                                                rng.sample_iter(&Standard).take(delta).collect();
+                                            file.write(old_len, &init).unwrap();
+                                            file_mirrors[file_index].data.append(&mut init);
+                                        }
+                                        Ordering::Equal => {}
                                     }
                                     file.commit().unwrap();
                                 }

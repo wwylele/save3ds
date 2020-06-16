@@ -26,6 +26,7 @@ struct DiffHeader {
     unique_id: u64,
 }
 
+/// DIFF container format that contains one DIFI partition.
 pub struct Diff {
     parent_len: usize,
     header_file: Rc<dyn RandomAccessFile>,

@@ -5,11 +5,11 @@ authors = ["Weiyi Wang <wwylele@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-sha2 = "0.8"
-aes = "0.3"
-cmac = "0.2"
+sha2 = "0.9"
+aes = "0.4"
+cmac = "0.3"
 byte_struct = "0.6"
-lru = "0.4"
+lru = "0.5"
 log = "0.4"
 
 [dev-dependencies]

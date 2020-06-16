@@ -11,8 +11,8 @@ use std::rc::Rc;
 pub trait Signer {
     fn hash(&self, data: Vec<u8>) -> Vec<u8> {
         let mut hasher = Sha256::new();
-        hasher.input(&self.block(data));
-        hasher.result().into_iter().collect()
+        hasher.update(&self.block(data));
+        hasher.finalize().into_iter().collect()
     }
     fn block(&self, data: Vec<u8>) -> Vec<u8>;
 }
@@ -80,9 +80,9 @@ impl SignedFile {
         self.data.read(0, &mut data)?;
         let hash = self.signer.hash(data);
         let mut cmac: Cmac<Aes128> = Cmac::new(GenericArray::from_slice(&self.key));
-        cmac.input(&hash);
+        cmac.update(&hash);
         let mut result = [0; 16];
-        result.copy_from_slice(cmac.result().code().as_slice());
+        result.copy_from_slice(cmac.finalize().into_bytes().as_slice());
         Ok(result)
     }
 }
@@ -146,9 +146,9 @@ pub mod test {
 
             let hash = signer.hash(init.clone());
             let mut cmac: Cmac<Aes128> = Cmac::new(GenericArray::from_slice(&key));
-            cmac.input(&hash);
+            cmac.update(&hash);
             let mut cmac_result = vec![0; 16];
-            cmac_result.copy_from_slice(cmac.result().code().as_slice());
+            cmac_result.copy_from_slice(cmac.finalize().into_bytes().as_slice());
 
             let data = Rc::new(MemoryFile::new(init));
             let signature = Rc::new(MemoryFile::new(cmac_result));

@@ -1,8 +1,6 @@
 use crate::error::*;
 use crate::misc::*;
 use crate::random_access_file::*;
-use aes::block_cipher_trait::generic_array::GenericArray;
-use aes::block_cipher_trait::*;
 use aes::*;
 use lru::LruCache;
 use std::cell::RefCell;
@@ -40,7 +38,7 @@ impl AesCtrFile {
         repeat_ctr: bool,
     ) -> AesCtrFile {
         let len = data.len();
-        let aes128 = Aes128::new(GenericArray::from_slice(&key));
+        let aes128 = Aes128::new(key[..].into());
         AesCtrFile {
             data,
             aes128,
@@ -62,8 +60,7 @@ impl AesCtrFile {
         } else {
             let mut ctr = self.ctr;
             seek_ctr(&mut ctr, block_index);
-            let block_buf = GenericArray::from_mut_slice(&mut ctr);
-            self.aes128.encrypt_block(block_buf);
+            self.aes128.encrypt_block((&mut ctr[..]).into());
             cache.put(block_index, ctr);
             ctr
         }

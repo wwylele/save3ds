@@ -110,8 +110,8 @@ impl RandomAccessFile for IvfcLevel {
                 }
 
                 let mut hasher = Sha256::new();
-                hasher.input(&block_buf);
-                let hash = hasher.result();
+                hasher.update(&block_buf);
+                let hash = hasher.finalize();
                 if hash[..] == hash_stored[..] {
                     // The hash is verified. Cache the status and copy the part we want
                     self.set_status(i, BLOCK_VERIFIED);
@@ -162,8 +162,8 @@ impl RandomAccessFile for IvfcLevel {
                 let end = std::cmp::min((i + 1) * self.block_len, self.len);
                 self.data.read(begin, &mut buf[0..end - begin])?;
                 let mut hasher = Sha256::new();
-                hasher.input(buf);
-                let hash = hasher.result();
+                hasher.update(buf);
+                let hash = hasher.finalize();
                 self.hash.write(i * 0x20, &hash)?;
                 self.set_status(i, BLOCK_VERIFIED);
             }

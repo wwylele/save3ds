@@ -87,6 +87,8 @@ pub struct MetaTableStat {
     pub free: usize,
 }
 
+/// Generic metadata table that implements children lookup / insertion / removal.
+/// This table can then be specialized to file table or directory table.
 struct MetaTable<KeyType, InfoType> {
     hash: Rc<dyn RandomAccessFile>,
     table: Rc<dyn RandomAccessFile>,
@@ -161,6 +163,7 @@ impl<KeyType: ByteStruct + PartialEq, InfoType: ByteStruct> MetaTable<KeyType, I
         })
     }
 
+    // Gets the bucket index in the hash table given the key.
     fn hash(&self, key: &KeyType) -> usize {
         let mut h = 0x1234_5678;
         let mut bytes = vec![0; KeyType::BYTE_LEN];
@@ -172,6 +175,7 @@ impl<KeyType: ByteStruct + PartialEq, InfoType: ByteStruct> MetaTable<KeyType, I
         h as usize % self.buckets
     }
 
+    /// Looks up an entry given the key and returns its info and index (inode).
     fn get(&self, key: &KeyType) -> Result<(InfoType, u32), Error> {
         let h = self.hash(key);
         let table = self.table.as_ref();
@@ -190,6 +194,7 @@ impl<KeyType: ByteStruct + PartialEq, InfoType: ByteStruct> MetaTable<KeyType, I
         make_error(Error::NotFound)
     }
 
+    /// Gets the entry at the specified index.
     fn get_at(&self, index: u32) -> Result<(InfoType, KeyType), Error> {
         let entry_offset = index as usize * self.entry_len;
         let table = self.table.as_ref();
@@ -198,11 +203,13 @@ impl<KeyType: ByteStruct + PartialEq, InfoType: ByteStruct> MetaTable<KeyType, I
         Ok((info, key))
     }
 
+    /// Sets the entry at the specified index.
     fn set(&self, index: u32, info: InfoType) -> Result<(), Error> {
         let entry_offset = index as usize * self.entry_len;
         write_struct(self.table.as_ref(), entry_offset + self.eo_info, info)
     }
 
+    /// Removes the entry at the specified index.
     fn remove(&self, index: u32) -> Result<(), Error> {
         let entry_offset = index as usize * self.entry_len;
         let table = self.table.as_ref();
@@ -232,6 +239,7 @@ impl<KeyType: ByteStruct + PartialEq, InfoType: ByteStruct> MetaTable<KeyType, I
         Ok(())
     }
 
+    /// Adds a new entry and returns its index.
     fn add(&self, key: KeyType, info: InfoType) -> Result<u32, Error> {
         match self.get(&key) {
             Err(Error::NotFound) => {}
@@ -285,6 +293,9 @@ impl<KeyType: ByteStruct + PartialEq, InfoType: ByteStruct> MetaTable<KeyType, I
         })
     }
 
+    /// Acquire a ticket that represents the entry is being opened.
+    /// The ticket can be used to check exclusive access before doing operations such as
+    /// deleting the entry.
     pub fn acquire_ticket(&self, index: u32) -> RefTicket<KeyType, InfoType> {
         let mut ref_count = self.ref_count.borrow_mut();
         let previous = ref_count.get(&index).cloned().unwrap_or(0);
@@ -298,6 +309,7 @@ impl<KeyType: ByteStruct + PartialEq, InfoType: ByteStruct> MetaTable<KeyType, I
     }
 }
 
+/// A KeyType used in MetaTable that contains a name and a parent reference.
 pub trait ParentedKey: ByteStruct + PartialEq + Clone {
     type NameType: PartialEq + Default;
     fn get_parent(&self) -> u32;
@@ -308,11 +320,18 @@ pub trait ParentedKey: ByteStruct + PartialEq + Clone {
     }
 }
 
+/// A InfoType used in MetaTable that represents a file entry.
+/// It contains a "next" field which is the index of the next file in the same directory.
 pub trait FileInfo: ByteStruct + Clone {
     fn set_next(&mut self, index: u32);
     fn get_next(&self) -> u32;
 }
 
+/// A InfoType used in MetaTable that represents a directory entry.
+/// It contains the following field:
+///  - sub_dir: index of the first child directory.
+///  - sub_file: index of the first child file.
+///  - next: index of the next directory in the same parent directory.
 pub trait DirInfo: ByteStruct + Clone {
     fn set_sub_dir(&mut self, index: u32);
     fn get_sub_dir(&self) -> u32;
@@ -320,6 +339,8 @@ pub trait DirInfo: ByteStruct + Clone {
     fn get_sub_file(&self) -> u32;
     fn set_next(&mut self, index: u32);
     fn get_next(&self) -> u32;
+
+    /// Creates an info entry that represents the root directory.
     fn new_root() -> Self;
 }
 
@@ -328,6 +349,9 @@ pub struct MetaStat {
     pub files: MetaTableStat,
 }
 
+/// Stores metadata for a file system, including file/directory name
+/// and their relationship. This works like a full file system but without
+/// any actual data of a file.
 pub struct FsMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType> {
     dirs: MetaTable<DirKeyType, DirInfoType>,
     files: MetaTable<FileKeyType, FileInfoType>,
@@ -383,6 +407,7 @@ impl<
     }
 }
 
+/// A handle to a file entry in the meta table.
 pub struct FileMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType> {
     ticket: RefTicket<FileKeyType, FileInfoType>,
     fs: Rc<FsMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>>,
@@ -395,6 +420,7 @@ impl<
         FileInfoType: FileInfo,
     > FileMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>
 {
+    /// Opens the file at the specified inode.
     pub fn open_ino(
         fs: Rc<FsMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>>,
         ino: u32,
@@ -403,6 +429,7 @@ impl<
         Ok(FileMeta { ticket, fs })
     }
 
+    /// Renames and/or change the parent of the file.
     pub fn rename(
         &mut self,
         parent: &DirMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>,
@@ -470,6 +497,7 @@ impl<
     }
 }
 
+/// A handle to a directory entry in the meta table.
 pub struct DirMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType> {
     ticket: RefTicket<DirKeyType, DirInfoType>,
     fs: Rc<FsMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>>,
@@ -482,6 +510,7 @@ impl<
         FileInfoType: FileInfo,
     > DirMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>
 {
+    /// Opens the directory at the specified inode. Inode 1 represents the root directory.
     pub fn open_ino(
         fs: Rc<FsMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>>,
         ino: u32,
@@ -490,6 +519,7 @@ impl<
         Ok(DirMeta { ticket, fs })
     }
 
+    /// Renames and/or change the parent of the directory.
     pub fn rename(
         &mut self,
         parent: &DirMeta<DirKeyType, DirInfoType, FileKeyType, FileInfoType>,
@@ -580,9 +610,9 @@ impl<
             info.set_sub_dir(0);
             info.set_sub_file(0);
         }
-        let pos = self.fs.dirs.add(key.clone(), info)?;
+        let pos = self.fs.dirs.add(key, info)?;
         self_info.set_sub_dir(pos);
-        self.fs.dirs.set(self.ticket.index, self_info.clone())?;
+        self.fs.dirs.set(self.ticket.index, self_info)?;
         let ticket = self.fs.dirs.acquire_ticket(pos);
         Ok(DirMeta {
             ticket,
@@ -598,9 +628,9 @@ impl<
         let (mut self_info, _) = self.fs.dirs.get_at(self.ticket.index)?;
         let key = FileKeyType::new(self.ticket.index, name);
         info.set_next(self_info.get_sub_file());
-        let pos = self.fs.files.add(key.clone(), info)?;
+        let pos = self.fs.files.add(key, info)?;
         self_info.set_sub_file(pos);
-        self.fs.dirs.set(self.ticket.index, self_info.clone())?;
+        self.fs.dirs.set(self.ticket.index, self_info)?;
         let ticket = self.fs.files.acquire_ticket(pos);
         Ok(FileMeta {
             ticket,

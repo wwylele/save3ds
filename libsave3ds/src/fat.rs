@@ -21,6 +21,7 @@ struct Entry {
     v: EntryHalf,
 }
 
+/// A file allocation table with ninty flavor.
 pub struct Fat {
     table: Rc<dyn RandomAccessFile>,
     data: Rc<dyn RandomAccessFile>,
@@ -332,11 +333,13 @@ impl Fat {
     }
 }
 
+/// A handle to a file in `Fat` that implements resizing, releasing, reading and writing.
 pub struct FatFile {
     fat: Rc<Fat>,
     block_list: Vec<BlockMap>,
 }
 impl FatFile {
+    /// Opens the file at the specific block index.
     pub fn open(fat: Rc<Fat>, first_block: usize) -> Result<FatFile, Error> {
         let mut block_list = Vec::new();
 
@@ -351,6 +354,8 @@ impl FatFile {
 
         Ok(FatFile { fat, block_list })
     }
+
+    /// Allocates a new file in `Fat` and returns its handle and block index.
     pub fn create(fat: Rc<Fat>, block_count: usize) -> Result<(FatFile, usize), Error> {
         if block_count == 0 {
             return make_error(Error::InvalidValue);
@@ -366,6 +371,7 @@ impl FatFile {
         Ok((FatFile { fat, block_list }, first))
     }
 
+    /// Releases the space this file holds.
     pub fn delete(self) -> Result<(), Error> {
         free(self.fat.table.as_ref(), &self.block_list)?;
         self.fat
@@ -374,6 +380,7 @@ impl FatFile {
         Ok(())
     }
 
+    /// Allocates more blocks for the file or releases some blocks.
     pub fn resize(&mut self, block_count: usize) -> Result<(), Error> {
         if block_count == 0 {
             return make_error(Error::InvalidValue);

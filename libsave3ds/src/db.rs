@@ -287,7 +287,7 @@ impl Db {
 
         let data: Rc<dyn RandomAccessFile> = Rc::new(FakeSizeFile {
             parent: Rc::new(SubFile::new(
-                without_pre.clone(),
+                without_pre,
                 fs_info.data_offset as usize,
                 data_len - data_delta,
             )?),

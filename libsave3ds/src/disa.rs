@@ -40,6 +40,7 @@ struct DisaHeader {
     active_table: u8,
 }
 
+/// DISA container format that contains one or two DIFI partitions.
 pub struct Disa {
     header_file: Rc<dyn RandomAccessFile>,
     table_upper: Rc<DualFile>,

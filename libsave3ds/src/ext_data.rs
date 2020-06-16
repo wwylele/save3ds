@@ -273,7 +273,7 @@ impl ExtData {
         let (dir_table, dir_table_block_index) =
             FatFile::create(fat.clone(), divide_up(dir_table_len, block_len))?;
         let (file_table, file_table_block_index) =
-            FatFile::create(fat.clone(), divide_up(file_table_len, block_len))?;
+            FatFile::create(fat, divide_up(file_table_len, block_len))?;
         let dir_table_combo = OffsetOrFatFile {
             block_index: dir_table_block_index as u32,
             block_count: (dir_table.len() / block_len) as u32,
@@ -431,17 +431,15 @@ impl ExtData {
             fs_info.dir_table.block_index as usize,
         )?);
 
-        let file_table: Rc<dyn RandomAccessFile> = Rc::new(FatFile::open(
-            fat.clone(),
-            fs_info.file_table.block_index as usize,
-        )?);
+        let file_table: Rc<dyn RandomAccessFile> =
+            Rc::new(FatFile::open(fat, fs_info.file_table.block_index as usize)?);
 
         let fs = FsMeta::new(dir_hash, dir_table, file_hash, file_table)?;
 
         Ok(ExtData {
             center: Rc::new(ExtDataInner {
                 sd_nand,
-                base_path: base_path.iter().map(|s| s.to_string()).collect(),
+                base_path: base_path.iter().map(|&s| s.to_string()).collect(),
                 id,
                 fs,
                 meta_file,

@@ -359,7 +359,7 @@ impl SaveData {
             let (dir_table, dir_table_block_index) =
                 FatFile::create(fat.clone(), divide_up(dir_table_len, info.block_len))?;
             let (file_table, file_table_block_index) =
-                FatFile::create(fat.clone(), divide_up(file_table_len, info.block_len))?;
+                FatFile::create(fat, divide_up(file_table_len, info.block_len))?;
             let dir_table_combo = OffsetOrFatFile {
                 block_index: dir_table_block_index as u32,
                 block_count: (dir_table.len() / info.block_len) as u32,

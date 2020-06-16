@@ -1011,12 +1011,12 @@ where
                 }
             }
 
-            match file.rename(&newdir, newname_converted.clone()) {
+            match file.rename(&newdir, newname_converted) {
                 Ok(()) => reply.ok(),
                 Err(Error::AlreadyExist) => reply.error(EEXIST),
                 Err(_) => reply.error(EIO),
             }
-        } else if let Ok(mut dir) = dir.open_sub_dir(name_converted.clone()) {
+        } else if let Ok(mut dir) = dir.open_sub_dir(name_converted) {
             if let Ok(old_dir) = newdir.open_sub_dir(newname_converted.clone()) {
                 match old_dir.delete() {
                     Ok(()) => (),

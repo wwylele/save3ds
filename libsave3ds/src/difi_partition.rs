@@ -113,6 +113,11 @@ impl DifiPartitionParam {
     }
 }
 
+/// Implements `RandomAccessFile` layer for a DIFI partition.
+///
+/// A DIFI partition consists of a descriptor file and a partition file.
+/// It implements fast data integrity checking and atomic operation by wrapping
+/// multiple DPFS and IVFC layers.
 pub struct DifiPartition {
     dpfs_level1: Rc<DualFile>,
     dpfs_level2: Rc<DpfsLevel>,

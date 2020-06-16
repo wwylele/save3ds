@@ -27,8 +27,6 @@ mod signed_file;
 mod sub_file;
 mod wear_leveling;
 
-use aes::block_cipher_trait::generic_array::GenericArray;
-use aes::block_cipher_trait::*;
 use aes::*;
 use cart_save_data::*;
 use db::*;
@@ -178,11 +176,11 @@ impl Resource {
             let mut otp_file = std::fs::File::open(otp_path)?;
             let mut otp = [0; 0x100];
             otp_file.read_exact(&mut otp)?;
-            let aes128 = Aes128::new(GenericArray::from_slice(&key_otp));
+            let aes128 = Aes128::new(key_otp[..].into());
             for block in otp.chunks_exact_mut(0x10) {
                 let mut pad = [0; 16];
                 pad.copy_from_slice(block);
-                aes128.decrypt_block(GenericArray::from_mut_slice(block));
+                aes128.decrypt_block(block.into());
                 for (i, b) in block.iter_mut().enumerate() {
                     *b ^= iv_otp[i];
                 }
@@ -190,29 +188,29 @@ impl Resource {
             }
 
             let mut hasher = Sha256::new();
-            hasher.input(&otp[0..0xE0]);
-            if otp[0xE0..0x100] != hasher.result()[..] {
+            hasher.update(&otp[0..0xE0]);
+            if otp[0xE0..0x100] != hasher.finalize()[..] {
                 return make_error(Error::BrokenOtp);
             }
 
             let (otp_salt, mut otp_salt_iv, mut otp_salt_block) =
                 otp_salt.ok_or(Error::MissingBoot9)?;
             let mut hasher = Sha256::new();
-            hasher.input(&otp[0x90..0xAC]);
-            hasher.input(&otp_salt[..]);
-            let hash = hasher.result();
+            hasher.update(&otp[0x90..0xAC]);
+            hasher.update(&otp_salt[..]);
+            let hash = hasher.finalize();
             let mut key_x = [0; 16];
             let mut key_y = [0; 16];
             key_x.copy_from_slice(&hash[0..16]);
             key_y.copy_from_slice(&hash[16..32]);
             let key = scramble(key_x, key_y);
-            let aes128 = Aes128::new(GenericArray::from_slice(&key));
+            let aes128 = Aes128::new(key[..].into());
 
             for block in otp_salt_block.chunks_exact_mut(0x10) {
                 for (i, b) in block.iter_mut().enumerate() {
                     *b ^= otp_salt_iv[i];
                 }
-                aes128.encrypt_block(GenericArray::from_mut_slice(block));
+                aes128.encrypt_block(block.into());
                 otp_salt_iv.copy_from_slice(&block);
             }
 
@@ -551,8 +549,8 @@ impl Resource {
                 key_y_block.extend_from_slice(&self.cart_id_long.ok_or(Error::MissingPriv)?);
 
                 let mut hasher = Sha256::new();
-                hasher.input(&key_y_block[..]);
-                let hash = hasher.result();
+                hasher.update(&key_y_block[..]);
+                let hash = hasher.finalize();
 
                 key_y[..].copy_from_slice(&hash[0..16]);
                 // TODO: is there case where repeat_ctr = true for version 2?
@@ -565,8 +563,8 @@ impl Resource {
                 key_y_block.extend_from_slice(&exefs_hash);
 
                 let mut hasher = Sha256::new();
-                hasher.input(&key_y_block[..]);
-                let hash = hasher.result();
+                hasher.update(&key_y_block[..]);
+                let hash = hasher.finalize();
 
                 // Yup this one use the same key x as ncch
                 let cmac_key = key_engine::scramble(
@@ -575,9 +573,9 @@ impl Resource {
                 );
 
                 use cmac::*;
-                let mut cmac = Cmac::<Aes128>::new(GenericArray::from_slice(&cmac_key[..]));
-                cmac.input(&hash);
-                key_y[..].copy_from_slice(cmac.result().code().as_slice());
+                let mut cmac = Cmac::<Aes128>::new(cmac_key[..].into());
+                cmac.update(&hash);
+                key_y[..].copy_from_slice(cmac.finalize().into_bytes().as_slice());
             }
             _ => return Err(Error::Unsupported),
         }

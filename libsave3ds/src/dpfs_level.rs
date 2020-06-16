@@ -11,7 +11,14 @@ pub struct DpfsLevel {
     len: usize,
     dirty: RefCell<Vec<u32>>,
 }
-
+/// Implements `RandomAccessFile` layer for a DPFS level.
+///
+/// A DPFS level consists of a selector file and two data files. For each data block, one of the
+/// two data files is active. Which one is active is recorded as one bit in the selector file.
+/// This structure enables atomic file write, where one can write a bunch of data to the inactive
+/// file, and then flip the bit in the selector to commit the change.
+///
+/// The bit string in the selector file is grouped into 32-bit little endian and MSB-first integers.
 impl DpfsLevel {
     pub fn new(
         selector: Rc<dyn RandomAccessFile>,

@@ -53,8 +53,8 @@ impl SdNandFileSystem for Sd {
             .collect();
 
         let mut hasher = Sha256::new();
-        hasher.input(&hash_path);
-        let hash = hasher.result();
+        hasher.update(&hash_path);
+        let hash = hasher.finalize();
         let mut ctr = [0; 16];
         for (i, c) in ctr.iter_mut().enumerate() {
             *c = hash[i] ^ hash[i + 16];
