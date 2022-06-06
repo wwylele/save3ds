@@ -16,6 +16,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
+    - name: Download dependencies
+      run: sudo apt-get update && sudo apt-get install -y libfuse-dev
     - name: Build
       run: cargo build --release --verbose
     - name: Run tests
