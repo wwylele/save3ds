@@ -9,7 +9,7 @@ sha2 = "0.9"
 aes = "0.4"
 cmac = "0.3"
 byte_struct = "0.6"
-lru = "0.5"
+lru = "0.7"
 log = "0.4"
 
 [dev-dependencies]
