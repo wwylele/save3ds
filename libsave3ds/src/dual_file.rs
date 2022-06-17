@@ -99,17 +99,17 @@ mod test {
 
         let mut rng = rand::thread_rng();
         for _ in 0..10 {
-            let len = rng.gen_range(1, 10_000);
+            let len = rng.gen_range(1..10_000);
             let selector = Rc::new(MemoryFile::new(vec![0; 1]));
             let pair: [Rc<dyn RandomAccessFile>; 2] = [
                 Rc::new(MemoryFile::new(
-                    rng.sample_iter(&Standard).take(len).collect(),
+                    (&mut rng).sample_iter(&Standard).take(len).collect(),
                 )),
                 Rc::new(MemoryFile::new(
-                    rng.sample_iter(&Standard).take(len).collect(),
+                    (&mut rng).sample_iter(&Standard).take(len).collect(),
                 )),
             ];
-            let init: Vec<u8> = rng.sample_iter(&Standard).take(len).collect();
+            let init: Vec<u8> = (&mut rng).sample_iter(&Standard).take(len).collect();
             let dual_file = DualFile::new(selector.clone(), pair.clone()).unwrap();
             dual_file.write(0, &init).unwrap();
             let plain = MemoryFile::new(init);

@@ -260,7 +260,7 @@ mod test {
 
             Diff::format(parent.clone(), Some((signer.clone(), key)), &param, 0).unwrap();
             let diff = Diff::new(parent.clone(), Some((signer.clone(), key))).unwrap();
-            let init: Vec<u8> = rng.sample_iter(&Standard).take(len).collect();
+            let init: Vec<u8> = (&mut rng).sample_iter(&Standard).take(len).collect();
             diff.partition().write(0, &init).unwrap();
             let plain = MemoryFile::new(init);
 

@@ -555,8 +555,8 @@ mod test {
 
         let mut rng = rand::thread_rng();
         for _ in 0..100 {
-            let block_len = rng.gen_range(1, 10);
-            let block_count = rng.gen_range(1, 100);
+            let block_len = rng.gen_range(1..10);
+            let block_count = rng.gen_range(1..100);
 
             let table = Rc::new(MemoryFile::new(vec![0; 8 * (block_count + 1)]));
             let data = Rc::new(MemoryFile::new(vec![0; block_count * block_len]));
@@ -574,16 +574,16 @@ mod test {
             let mut files = vec![];
 
             for _ in 0..10000 {
-                let operation = rng.gen_range(1, 20);
+                let operation = rng.gen_range(1..20);
                 if operation < 2 {
                     // create file
-                    let file_block_count = rng.gen_range(1, block_count / 2 + 2);
+                    let file_block_count = rng.gen_range(1..block_count / 2 + 2);
                     match FatFile::create(fat.clone(), file_block_count) {
                         Err(Error::NoSpace) => assert!(file_block_count > free_block_count),
                         Ok((fat_file, start_block)) => {
                             assert!(file_block_count <= free_block_count);
                             free_block_count -= file_block_count;
-                            let image: Vec<u8> = rng
+                            let image: Vec<u8> = (&mut rng)
                                 .sample_iter(&Standard)
                                 .take(file_block_count * block_len)
                                 .collect();
@@ -602,7 +602,7 @@ mod test {
                         continue;
                     }
 
-                    let file_index = rng.gen_range(0, files.len());
+                    let file_index = rng.gen_range(0..files.len());
                     files[file_index].fat_file =
                         FatFile::open(fat.clone(), files[file_index].start_block).unwrap();
                 } else if operation < 10 {
@@ -610,13 +610,13 @@ mod test {
                     if files.is_empty() {
                         continue;
                     }
-                    let file_index = rng.gen_range(0, files.len());
+                    let file_index = rng.gen_range(0..files.len());
                     let file = &mut files[file_index];
                     let len = file.image.len();
-                    let pos = rng.gen_range(0, len);
-                    let data_len = rng.gen_range(1, len - pos + 1);
+                    let pos = rng.gen_range(0..len);
+                    let data_len = rng.gen_range(1..len - pos + 1);
                     if operation < 7 {
-                        let a: Vec<u8> = rng.sample_iter(&Standard).take(data_len).collect();
+                        let a: Vec<u8> = (&mut rng).sample_iter(&Standard).take(data_len).collect();
                         file.fat_file.write(pos, &a).unwrap();
                         file.image[pos..pos + data_len].copy_from_slice(&a);
                     } else {
@@ -629,7 +629,7 @@ mod test {
                     if files.is_empty() {
                         continue;
                     }
-                    let file_index = rng.gen_range(0, files.len());
+                    let file_index = rng.gen_range(0..files.len());
                     let file = files.remove(file_index);
                     free_block_count += file.image.len() / block_len;
                     file.fat_file.delete().unwrap();
@@ -638,18 +638,20 @@ mod test {
                     if files.is_empty() {
                         continue;
                     }
-                    let file_index = rng.gen_range(0, files.len());
+                    let file_index = rng.gen_range(0..files.len());
                     let file = &mut files[file_index];
                     let file_block_count = file.image.len() / block_len;
-                    let new_block_count = rng.gen_range(1, file_block_count * 2 + 1);
+                    let new_block_count = rng.gen_range(1..file_block_count * 2 + 1);
 
                     if new_block_count > file_block_count {
                         let delta = new_block_count - file_block_count;
                         match file.fat_file.resize(new_block_count) {
                             Err(Error::NoSpace) => assert!(delta > free_block_count),
                             Ok(()) => {
-                                let mut a: Vec<u8> =
-                                    rng.sample_iter(&Standard).take(delta * block_len).collect();
+                                let mut a: Vec<u8> = (&mut rng)
+                                    .sample_iter(&Standard)
+                                    .take(delta * block_len)
+                                    .collect();
                                 file.fat_file
                                     .write(file_block_count * block_len, &a)
                                     .unwrap();

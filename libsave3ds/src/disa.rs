@@ -321,7 +321,7 @@ mod test {
         partition_index: usize,
         signer: Option<(Box<SimpleSigner>, [u8; 16])>,
     ) {
-        let rng = rand::thread_rng();
+        let mut rng = rand::thread_rng();
         let disa = Disa::new(
             raw_file.clone(),
             signer
@@ -331,7 +331,7 @@ mod test {
         .unwrap();
         let partition = &disa[partition_index];
         let len = partition.len();
-        let init: Vec<u8> = rng.sample_iter(&Standard).take(len).collect();
+        let init: Vec<u8> = (&mut rng).sample_iter(&Standard).take(len).collect();
         partition.write(0, &init).unwrap();
         let plain = MemoryFile::new(init);
 

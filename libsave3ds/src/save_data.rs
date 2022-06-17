@@ -794,17 +794,17 @@ mod test {
         use rand::prelude::*;
         let mut rng = rand::thread_rng();
         let mut name = [0; 16];
-        name[0] = rng.gen_range(0, 5);
+        name[0] = rng.gen_range(0..5);
         name
     }
 
     fn gen_len() -> usize {
         use rand::prelude::*;
         let mut rng = rand::thread_rng();
-        if rng.gen_range(0, 5) == 0 {
+        if rng.gen_range(0..5) == 0 {
             0
         } else {
-            rng.gen_range(0, 4096 * 5)
+            rng.gen_range(0..4096 * 5)
         }
     }
 
@@ -815,19 +815,19 @@ mod test {
 
         for _ in 0..10 {
             let param = SaveDataFormatParam {
-                block_type: match rng.gen_range(0, 2) {
+                block_type: match rng.gen_range(0..2) {
                     0 => SaveDataBlockType::Small,
                     1 => SaveDataBlockType::Large,
                     _ => unreachable!(),
                 },
-                max_dir: rng.gen_range(10, 100),
-                dir_buckets: rng.gen_range(10, 100),
-                max_file: rng.gen_range(10, 100),
-                file_buckets: rng.gen_range(10, 100),
+                max_dir: rng.gen_range(10..100),
+                dir_buckets: rng.gen_range(10..100),
+                max_file: rng.gen_range(10..100),
+                file_buckets: rng.gen_range(10..100),
                 duplicate_data: rng.gen(),
             };
 
-            let disa_len = rng.gen_range(100_000, 1_000_000);
+            let disa_len = rng.gen_range(100_000..1_000_000);
             let disa_raw = Rc::new(MemoryFile::new(vec![0; disa_len]));
             SaveData::format(disa_raw.clone(), SaveDataType::Bare, &param).unwrap();
             let file_system = SaveData::new(disa_raw.clone(), SaveDataType::Bare).unwrap();

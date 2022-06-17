@@ -176,6 +176,7 @@ impl Resource {
             let mut otp_file = std::fs::File::open(otp_path)?;
             let mut otp = [0; 0x100];
             otp_file.read_exact(&mut otp)?;
+            use aes::cipher::*;
             let aes128 = Aes128::new(key_otp[..].into());
             for block in otp.chunks_exact_mut(0x10) {
                 let mut pad = [0; 16];
@@ -211,7 +212,7 @@ impl Resource {
                     *b ^= otp_salt_iv[i];
                 }
                 aes128.encrypt_block(block.into());
-                otp_salt_iv.copy_from_slice(&block);
+                otp_salt_iv.copy_from_slice(block);
             }
 
             let mut key_x_db = [0; 16];
@@ -283,7 +284,7 @@ impl Resource {
         SaveData::format(
             file,
             SaveDataType::Sd(self.key_sign.ok_or(Error::MissingBoot9)?, id),
-            &param,
+            param,
         )?;
 
         Ok(())
@@ -329,7 +330,7 @@ impl Resource {
         SaveData::format(
             file,
             SaveDataType::Nand(self.key_sign.ok_or(Error::MissingBoot9)?, id),
-            &param,
+            param,
         )?;
 
         Ok(())
@@ -406,7 +407,7 @@ impl Resource {
                 .open(path)?,
         )?);
 
-        SaveData::format(file, SaveDataType::Bare, &param)?;
+        SaveData::format(file, SaveDataType::Bare, param)?;
 
         Ok(())
     }
@@ -617,7 +618,7 @@ impl Resource {
                 .open(path)?,
         )?);
 
-        CartSaveData::format(file, &self.get_cart_format()?, &param)?;
+        CartSaveData::format(file, &self.get_cart_format()?, param)?;
 
         Ok(())
     }

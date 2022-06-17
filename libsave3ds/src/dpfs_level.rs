@@ -267,23 +267,26 @@ mod test {
 
         let mut rng = rand::thread_rng();
         for _ in 0..10 {
-            let len = rng.gen_range(1, 10_000);
-            let block_len = rng.gen_range(1, 100);
+            let len = rng.gen_range(1..10_000);
+            let block_len = rng.gen_range(1..100);
             let block_count = divide_up(len, block_len);
             let chunk_count = divide_up(block_count, 32);
             let selector_len = chunk_count * 4;
             let selector = Rc::new(MemoryFile::new(
-                rng.sample_iter(&Standard).take(selector_len).collect(),
+                (&mut rng)
+                    .sample_iter(&Standard)
+                    .take(selector_len)
+                    .collect(),
             ));
             let pair: [Rc<dyn RandomAccessFile>; 2] = [
                 Rc::new(MemoryFile::new(
-                    rng.sample_iter(&Standard).take(len).collect(),
+                    (&mut rng).sample_iter(&Standard).take(len).collect(),
                 )),
                 Rc::new(MemoryFile::new(
-                    rng.sample_iter(&Standard).take(len).collect(),
+                    (&mut rng).sample_iter(&Standard).take(len).collect(),
                 )),
             ];
-            let init: Vec<u8> = rng.sample_iter(&Standard).take(len).collect();
+            let init: Vec<u8> = (&mut rng).sample_iter(&Standard).take(len).collect();
             let dpfs_level = DpfsLevel::new(selector.clone(), pair.clone(), block_len).unwrap();
             dpfs_level.write(0, &init).unwrap();
             let plain = MemoryFile::new(init);

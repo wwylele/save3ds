@@ -68,5 +68,4 @@ mod test {
         assert_eq!(SaveExtKey::BYTE_LEN, 0x14);
         assert_eq!(SaveExtDir::BYTE_LEN, 0x10);
     }
-
 }

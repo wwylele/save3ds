@@ -258,7 +258,7 @@ impl WearLeveling {
             allocate_count: u8,
             initialized: bool,
             crc_ticket: Option<MemoryFile>,
-        };
+        }
 
         let mut blocks = vec![];
         let item_len = if large_save { 2 } else { 10 };
@@ -543,8 +543,8 @@ pub mod test {
     fn fuzz_crc() {
         let mut rng = rand::thread_rng();
         for _ in 0..10 {
-            let len = rng.gen_range(1, 100);
-            let init: Vec<u8> = rng.sample_iter(&Standard).take(len).collect();
+            let len = rng.gen_range(1..100);
+            let init: Vec<u8> = (&mut rng).sample_iter(&Standard).take(len).collect();
             let crc = crc16_ninty(&init).to_le_bytes().to_vec();
             let crc = Rc::new(MemoryFile::new(crc));
             let data = Rc::new(MemoryFile::new(init));
@@ -570,8 +570,8 @@ pub mod test {
     fn fuzz_crc_xor() {
         let mut rng = rand::thread_rng();
         for _ in 0..10 {
-            let len = rng.gen_range(1, 100);
-            let init: Vec<u8> = rng.sample_iter(&Standard).take(len).collect();
+            let len = rng.gen_range(1..100);
+            let init: Vec<u8> = (&mut rng).sample_iter(&Standard).take(len).collect();
             let crc = crc16_ninty(&init).to_le_bytes();
             let crc = vec![crc[0] ^ crc[1]];
             let crc = Rc::new(MemoryFile::new(crc));
@@ -595,8 +595,8 @@ pub mod test {
     fn fuzz_mirrored() {
         let mut rng = rand::thread_rng();
         for _ in 0..10 {
-            let len = rng.gen_range(1, 100);
-            let init0: Vec<u8> = rng.sample_iter(&Standard).take(len).collect();
+            let len = rng.gen_range(1..100);
+            let init0: Vec<u8> = (&mut rng).sample_iter(&Standard).take(len).collect();
             let init1: Vec<u8> = init0.clone();
             let data0 = Rc::new(MemoryFile::new(init0));
             let data1 = Rc::new(MemoryFile::new(init1));

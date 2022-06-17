@@ -706,8 +706,8 @@ mod test {
         use crate::save_ext_common::*;
         let mut rng = rand::thread_rng();
         for _ in 0..100 {
-            let dir_entry_count = rng.gen_range(10, 1000);
-            let dir_buckets = rng.gen_range(10, 100);
+            let dir_entry_count = rng.gen_range(10..1000);
+            let dir_buckets = rng.gen_range(10..100);
             let dir_hash = Rc::new(MemoryFile::new(vec![0; dir_buckets * 4]));
             let dir_table = Rc::new(MemoryFile::new(vec![
                 0;
@@ -717,8 +717,8 @@ mod test {
                         + 4)
             ]));
 
-            let file_entry_count = rng.gen_range(10, 1000);
-            let file_buckets = rng.gen_range(10, 100);
+            let file_entry_count = rng.gen_range(10..1000);
+            let file_buckets = rng.gen_range(10..100);
             let file_hash = Rc::new(MemoryFile::new(vec![0; file_buckets * 4]));
             let file_table = Rc::new(MemoryFile::new(vec![
                 0;
@@ -772,13 +772,13 @@ mod test {
             let mut files: Vec<File> = vec![];
 
             for _ in 0..1000 {
-                match rng.gen_range(0, 9) {
+                match rng.gen_range(0i32..9) {
                     0 => {
                         // open_sub_dir
                         if dirs.len() == 1 {
                             continue;
                         }
-                        let index = rng.gen_range(1, dirs.len());
+                        let index = rng.gen_range(1..dirs.len());
                         dirs[index].meta = dirs[dirs[index].parent]
                             .meta
                             .open_sub_dir(dirs[index].name)
@@ -786,7 +786,7 @@ mod test {
                     }
                     1 => {
                         // new_sub_dir
-                        let parent = rng.gen_range(0, dirs.len());
+                        let parent = rng.gen_range(0..dirs.len());
                         let name = loop {
                             let name: [u8; 16] = rng.gen();
                             if !dirs[parent].sub_dir_name.contains(&name) {
@@ -822,7 +822,7 @@ mod test {
                         if dirs.len() == 1 {
                             continue;
                         }
-                        let index = rng.gen_range(1, dirs.len());
+                        let index = rng.gen_range(1..dirs.len());
                         let mut dir = dirs.remove(index);
                         let ino = dir.meta.get_ino();
                         match dir.meta.delete() {
@@ -859,7 +859,7 @@ mod test {
                     }
                     3 => {
                         // list_sub_dir
-                        let index = rng.gen_range(0, dirs.len());
+                        let index = rng.gen_range(0..dirs.len());
                         assert_eq!(
                             HashSet::from_iter(
                                 dirs[index]
@@ -888,7 +888,7 @@ mod test {
                         if files.is_empty() {
                             continue;
                         }
-                        let index = rng.gen_range(0, files.len());
+                        let index = rng.gen_range(0..files.len());
                         files[index].meta = dirs[files[index].parent]
                             .meta
                             .open_sub_file(files[index].name)
@@ -896,7 +896,7 @@ mod test {
                     }
                     5 => {
                         // new_sub_file
-                        let parent = rng.gen_range(0, dirs.len());
+                        let parent = rng.gen_range(0..dirs.len());
                         let name = loop {
                             let name: [u8; 16] = rng.gen();
                             if !dirs[parent].sub_file_name.contains(&name) {
@@ -927,7 +927,7 @@ mod test {
                         if files.is_empty() {
                             continue;
                         }
-                        let index = rng.gen_range(0, files.len());
+                        let index = rng.gen_range(0..files.len());
                         let file = files.remove(index);
                         file.meta.delete().unwrap();
                         let parent = file.parent;
@@ -938,9 +938,9 @@ mod test {
                         if files.is_empty() {
                             continue;
                         }
-                        let index = rng.gen_range(0, files.len());
+                        let index = rng.gen_range(0..files.len());
 
-                        let parent = rng.gen_range(0, dirs.len());
+                        let parent = rng.gen_range(0..dirs.len());
                         let name = loop {
                             let name: [u8; 16] = rng.gen();
                             if !dirs[parent].sub_file_name.contains(&name) {
@@ -965,9 +965,9 @@ mod test {
                         if dirs.len() == 1 {
                             continue;
                         }
-                        let index = rng.gen_range(1, dirs.len());
+                        let index = rng.gen_range(1..dirs.len());
 
-                        let parent = rng.gen_range(0, dirs.len());
+                        let parent = rng.gen_range(0..dirs.len());
                         if parent == index {
                             continue;
                         }
@@ -1013,8 +1013,8 @@ mod test {
 
         for _ in 0..100 {
             let mut key_set: HashSet<Key> = HashSet::new();
-            let entry_count = rng.gen_range(10, 1000);
-            let buckets = rng.gen_range(10, 100);
+            let entry_count = rng.gen_range(10..1000);
+            let buckets = rng.gen_range(10..100);
             let hash = Rc::new(MemoryFile::new(vec![0; buckets * 4]));
             let table = Rc::new(MemoryFile::new(vec![0; entry_count * 16]));
             MetaTable::<Key, Info>::format(hash.as_ref(), table.as_ref(), entry_count).unwrap();
@@ -1029,7 +1029,7 @@ mod test {
             let mut occupied = 1;
 
             for _ in 0..1000 {
-                match rng.gen_range(0, 5) {
+                match rng.gen_range(0i32..5) {
                     0 => {
                         // add
                         let key = loop {
@@ -1053,7 +1053,7 @@ mod test {
                             continue;
                         }
                         // remove
-                        let image_i = rng.gen_range(0, chains.len());
+                        let image_i = rng.gen_range(0..chains.len());
                         meta.remove(chains[image_i].pos).unwrap();
                         key_set.remove(&chains[image_i].key);
                         chains.remove(image_i);
@@ -1076,7 +1076,7 @@ mod test {
                                 _ => unreachable!(),
                             }
                         } else {
-                            let image_i = rng.gen_range(0, chains.len());
+                            let image_i = rng.gen_range(0..chains.len());
                             let (info, pos) = meta.get(&chains[image_i].key).unwrap();
                             assert_eq!(info, chains[image_i].info);
                             assert_eq!(pos, chains[image_i].pos);
@@ -1087,7 +1087,7 @@ mod test {
                             continue;
                         }
                         // get_at
-                        let image_i = rng.gen_range(0, chains.len());
+                        let image_i = rng.gen_range(0..chains.len());
                         let (info, key) = meta.get_at(chains[image_i].pos).unwrap();
                         assert_eq!(info, chains[image_i].info);
                         assert_eq!(key, chains[image_i].key);
@@ -1097,7 +1097,7 @@ mod test {
                             continue;
                         }
                         // set
-                        let image_i = rng.gen_range(0, chains.len());
+                        let image_i = rng.gen_range(0..chains.len());
                         let info = Info { v: rng.gen() };
                         chains[image_i].info = info.clone();
                         meta.set(chains[image_i].pos, info).unwrap();

@@ -218,7 +218,7 @@ pub mod test {
         let mut file_mirrors: Vec<FileMirror<T::NameType>> = vec![];
 
         for _ in 0..1000 {
-            let main_op = rng.gen_range(0, 10);
+            let main_op: i32 = rng.gen_range(0..10);
             if main_op == 0 {
                 // commit
                 file_system.commit().unwrap();
@@ -228,7 +228,7 @@ pub mod test {
                 file_system = reloader();
             } else if main_op < 5 {
                 // dir operations
-                let dir_index = rng.gen_range(0, dir_mirrors.len());
+                let dir_index = rng.gen_range(0..dir_mirrors.len());
                 let dir_mirror = &dir_mirrors[dir_index];
                 let mut dir = if rng.gen() {
                     // open via ino
@@ -284,7 +284,7 @@ pub mod test {
 
                 for _ in 0..10 {
                     let dir_mirror = &dir_mirrors[dir_index];
-                    match rng.gen_range(0, 9) {
+                    match rng.gen_range(0i32..9) {
                         0..=2 => {
                             // new sub dir
                             let name = gen_name();
@@ -344,7 +344,7 @@ pub mod test {
                         }
                         4..=5 => {
                             // rename dir
-                            let new_parent_index = rng.gen_range(0, dir_mirrors.len());
+                            let new_parent_index = rng.gen_range(0..dir_mirrors.len());
                             let new_parent_mirror = &dir_mirrors[new_parent_index];
                             let new_name = gen_name();
                             if is_prefix(&dir_mirror.path, &new_parent_mirror.path) {
@@ -419,7 +419,7 @@ pub mod test {
                                     assert!(file_mirrors.iter().all(|d| d.path != child_path));
                                     assert!(file_mirrors.len() < max_file);
                                     let init: Vec<u8> =
-                                        rng.sample_iter(&Standard).take(len).collect();
+                                        (&mut rng).sample_iter(&Standard).take(len).collect();
                                     if !init.is_empty() {
                                         child.write(0, &init).unwrap();
                                     }
@@ -443,7 +443,7 @@ pub mod test {
                     continue;
                 }
 
-                let file_index = rng.gen_range(0, file_mirrors.len());
+                let file_index = rng.gen_range(0..file_mirrors.len());
                 let mut file = if rng.gen() {
                     // open via ino
                     file_system.open_file(file_mirrors[file_index].ino).unwrap()
@@ -473,7 +473,7 @@ pub mod test {
                 );
 
                 for _ in 0..10 {
-                    match rng.gen_range(0, 7) {
+                    match rng.gen_range(0i32..7) {
                         0 => {
                             // delete
                             file.delete().unwrap();
@@ -482,7 +482,7 @@ pub mod test {
                         }
                         1 => {
                             // rename
-                            let new_parent_index = rng.gen_range(0, dir_mirrors.len());
+                            let new_parent_index = rng.gen_range(0..dir_mirrors.len());
                             let new_parent_mirror = &dir_mirrors[new_parent_index];
                             let new_name = gen_name();
                             let new_parent = file_system.open_dir(new_parent_mirror.ino).unwrap();
@@ -515,11 +515,11 @@ pub mod test {
                                 continue;
                             }
                             let len = file_mirrors[file_index].data.len();
-                            let pos = rng.gen_range(0, len);
-                            let data_len = rng.gen_range(1, len - pos + 1);
+                            let pos = rng.gen_range(0..len);
+                            let data_len = rng.gen_range(1..len - pos + 1);
                             if rng.gen() {
                                 let a: Vec<u8> =
-                                    rng.sample_iter(&Standard).take(data_len).collect();
+                                    (&mut rng).sample_iter(&Standard).take(data_len).collect();
                                 file.write(pos, &a).unwrap();
                                 file.commit().unwrap();
                                 file_mirrors[file_index].data[pos..pos + data_len]
@@ -553,8 +553,10 @@ pub mod test {
                                         }
                                         Ordering::Greater => {
                                             let delta = len - old_len;
-                                            let mut init: Vec<u8> =
-                                                rng.sample_iter(&Standard).take(delta).collect();
+                                            let mut init: Vec<u8> = (&mut rng)
+                                                .sample_iter(&Standard)
+                                                .take(delta)
+                                                .collect();
                                             file.write(old_len, &init).unwrap();
                                             file_mirrors[file_index].data.append(&mut init);
                                         }

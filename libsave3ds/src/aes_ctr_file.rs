@@ -1,6 +1,7 @@
 use crate::error::*;
 use crate::misc::*;
 use crate::random_access_file::*;
+use aes::cipher::*;
 use aes::*;
 use lru::LruCache;
 use std::cell::RefCell;
@@ -146,9 +147,9 @@ mod test {
 
         let mut rng = rand::thread_rng();
         for _ in 0..10 {
-            let len = rng.gen_range(1, 1000);
+            let len = rng.gen_range(1..1000);
             let data = Rc::new(MemoryFile::new(
-                rng.sample_iter(&Standard).take(len).collect(),
+                (&mut rng).sample_iter(&Standard).take(len).collect(),
             ));
             let key: [u8; 16] = rng.gen();
             let ctr: [u8; 16] = rng.gen();

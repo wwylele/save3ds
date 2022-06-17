@@ -821,17 +821,17 @@ mod test {
         use rand::prelude::*;
         let mut rng = rand::thread_rng();
         let mut name = [0; 16];
-        name[0] = rng.gen_range(0, 5);
+        name[0] = rng.gen_range(0..5);
         name
     }
 
     fn gen_len() -> usize {
         use rand::prelude::*;
         let mut rng = rand::thread_rng();
-        if rng.gen_range(0, 5) == 0 {
+        if rng.gen_range(0..5) == 0 {
             0
         } else {
-            rng.gen_range(0, 4096 * 5)
+            rng.gen_range(0..4096 * 5)
         }
     }
 
@@ -844,10 +844,10 @@ mod test {
             let nand = Rc::new(crate::sd_nand_common::test::VirtualFileSystem::new());
 
             let param = ExtDataFormatParam {
-                max_dir: rng.gen_range(10, 100),
-                dir_buckets: rng.gen_range(10, 100),
-                max_file: rng.gen_range(10, 100),
-                file_buckets: rng.gen_range(10, 100),
+                max_dir: rng.gen_range(10..100),
+                dir_buckets: rng.gen_range(10..100),
+                max_file: rng.gen_range(10..100),
+                file_buckets: rng.gen_range(10..100),
             };
 
             ExtData::format(nand.as_ref(), &[], 0, [0; 16], None, &param).unwrap();
