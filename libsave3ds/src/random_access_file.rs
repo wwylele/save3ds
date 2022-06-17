@@ -66,7 +66,7 @@ pub fn write_struct<T: ByteStruct>(
 pub fn fuzzer<Subject, SubjectFile: RandomAccessFile, Control: RandomAccessFile>(
     mut subject: Subject,
     accessor: impl Fn(&Subject) -> &SubjectFile,
-    commitor: impl Fn(&Subject) -> (),
+    commitor: impl Fn(&Subject),
     reloader: impl Fn() -> Subject,
     control: Control,
 ) {
@@ -76,15 +76,15 @@ pub fn fuzzer<Subject, SubjectFile: RandomAccessFile, Control: RandomAccessFile>
     let len = accessor(&subject).len();
     let mut rng = rand::thread_rng();
     for _ in 0..1000 {
-        let operation = rng.gen_range(1, 10);
+        let operation = rng.gen_range(1..10);
         if operation == 1 {
             commitor(&subject);
             subject = reloader();
         } else if operation < 4 {
             commitor(&subject);
         } else {
-            let pos = rng.gen_range(0, len);
-            let data_len = rng.gen_range(1, len - pos + 1);
+            let pos = rng.gen_range(0..len);
+            let data_len = rng.gen_range(1..len - pos + 1);
             if operation < 7 {
                 let mut a = vec![0; data_len];
                 let mut b = vec![0; data_len];
@@ -92,7 +92,7 @@ pub fn fuzzer<Subject, SubjectFile: RandomAccessFile, Control: RandomAccessFile>
                 control.read(pos, &mut b).unwrap();
                 assert_eq!(a, b);
             } else {
-                let a: Vec<u8> = rng.sample_iter(&Standard).take(data_len).collect();
+                let a: Vec<u8> = (&mut rng).sample_iter(&Standard).take(data_len).collect();
                 accessor(&subject).write(pos, &a).unwrap();
                 control.write(pos, &a).unwrap();
             }

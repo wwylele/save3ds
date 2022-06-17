@@ -11,7 +11,7 @@ unixfuse = ["libc", "fuse", "time"]
 [dependencies]
 libsave3ds = { path = "../libsave3ds" }
 getopts = "0.2"
-stderrlog = "0.4"
+stderrlog = "0.5"
 
 [target.'cfg(unix)'.dependencies]
 libc = { version = "0.2", optional = true }

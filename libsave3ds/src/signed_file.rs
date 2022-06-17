@@ -1,7 +1,6 @@
 use crate::error::*;
 use crate::random_access_file::*;
 use aes::*;
-use cmac::crypto_mac::generic_array::*;
 use cmac::*;
 use log::*;
 use sha2::*;
@@ -79,7 +78,7 @@ impl SignedFile {
         let mut data = vec![0; self.len];
         self.data.read(0, &mut data)?;
         let hash = self.signer.hash(data);
-        let mut cmac: Cmac<Aes128> = Cmac::new(GenericArray::from_slice(&self.key));
+        let mut cmac: Cmac<Aes128> = Cmac::new((&self.key).into());
         cmac.update(&hash);
         let mut result = [0; 16];
         result.copy_from_slice(cmac.finalize().into_bytes().as_slice());
@@ -138,14 +137,14 @@ pub mod test {
 
         let mut rng = rand::thread_rng();
         for _ in 0..10 {
-            let len = rng.gen_range(1, 100);
-            let init: Vec<u8> = rng.sample_iter(&Standard).take(len).collect();
+            let len = rng.gen_range(1..100);
+            let init: Vec<u8> = (&mut rng).sample_iter(&Standard).take(len).collect();
 
             let signer = Box::new(SimpleSigner::new());
             let key: [u8; 16] = rng.gen();
 
             let hash = signer.hash(init.clone());
-            let mut cmac: Cmac<Aes128> = Cmac::new(GenericArray::from_slice(&key));
+            let mut cmac: Cmac<Aes128> = Cmac::new((&key).into());
             cmac.update(&hash);
             let mut cmac_result = vec![0; 16];
             cmac_result.copy_from_slice(cmac.finalize().into_bytes().as_slice());

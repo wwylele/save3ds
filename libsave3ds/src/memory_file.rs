@@ -38,7 +38,7 @@ impl RandomAccessFile for MemoryFile {
         if pos + buf.len() > data.len() {
             return make_error(Error::OutOfBound);
         }
-        data[pos..pos + buf.len()].copy_from_slice(&buf);
+        data[pos..pos + buf.len()].copy_from_slice(buf);
         Ok(())
     }
     fn len(&self) -> usize {
