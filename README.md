@@ -19,7 +19,7 @@ Note that the supported NAND format is in unpacked cleartext filesystem. If you 
  1. install pkg-config and FUSE library.
    - Debian: `sudo apt-get install libfuse-dev pkg-config`
    - CentOS: `sudo yum install fuse-devel pkgconfig`
-   - macOS: `brew cask install osxfuse && brew install pkg-config`
+   - macOS: `brew install macfuse --cask`
    - FreeBSD: `pkg install fusefs-libs pkgconf`
  2.
  ```
