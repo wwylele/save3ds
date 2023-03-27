@@ -147,41 +147,41 @@ where
     Ok(())
 }
 
-fn extract<T: FileSystem>(save: T, mountpoint: &std::path::Path) -> Result<(), ()>
+fn extract<T: FileSystem>(save: T, mountpoint: &std::path::Path) -> Result<(), Error>
 where
     T::NameType: NameConvert + Clone,
 {
     println!("Extracting...");
-    let root = save.open_root().unwrap();
-    extract_impl(&save, root, mountpoint, 0).unwrap();
+    let root = save.open_root()?;
+    extract_impl(&save, root, mountpoint, 0)?;
     println!("Finished");
     Ok(())
 }
 
-fn clear_impl<T: FileSystem>(save: &T, dir: &T::DirType) -> Result<(), ()>
+fn clear_impl<T: FileSystem>(save: &T, dir: &T::DirType) -> Result<(), Error>
 where
     T::NameType: NameConvert + Clone,
 {
-    for (_, ino) in dir.list_sub_dir().unwrap() {
-        let dir = save.open_dir(ino).unwrap();
-        clear_impl(save, &dir).unwrap();
-        dir.delete().unwrap();
+    for (_, ino) in dir.list_sub_dir()? {
+        let dir = save.open_dir(ino)?;
+        clear_impl(save, &dir)?;
+        dir.delete()?;
     }
 
-    for (_, ino) in dir.list_sub_file().unwrap() {
-        let file = save.open_file(ino).unwrap();
-        file.delete().unwrap();
+    for (_, ino) in dir.list_sub_file()? {
+        let file = save.open_file(ino)?;
+        file.delete()?;
     }
 
     Ok(())
 }
 
-fn import_impl<T: FileSystem>(save: &T, dir: &T::DirType, path: &std::path::Path) -> Result<(), ()>
+fn import_impl<T: FileSystem>(save: &T, dir: &T::DirType, path: &std::path::Path) -> Result<(), Error>
 where
     T::NameType: NameConvert + Clone,
 {
-    for entry in std::fs::read_dir(&path).unwrap() {
-        let entry = entry.unwrap();
+    for entry in std::fs::read_dir(&path)? {
+        let entry = entry?;
         println!("{:?}", entry.path());
         let name = if let Some(name) = entry
             .path()
@@ -195,18 +195,18 @@ where
             continue;
         };
 
-        let file_type = entry.file_type().unwrap();
+        let file_type = entry.file_type()?;
         if file_type.is_dir() {
-            let dir = dir.new_sub_dir(name).unwrap();
+            let dir = dir.new_sub_dir(name)?;
             import_impl(save, &dir, &entry.path())?
         } else if file_type.is_file() {
-            let mut host_file = std::fs::File::open(&entry.path()).unwrap();
-            let len = host_file.metadata().unwrap().len() as usize;
-            let file = dir.new_sub_file(name, len).unwrap();
+            let mut host_file = std::fs::File::open(&entry.path())?;
+            let len = host_file.metadata()?.len() as usize;
+            let file = dir.new_sub_file(name, len)?;
             let mut buffer = vec![0; len];
-            host_file.read_exact(&mut buffer).unwrap();
-            file.write(0, &buffer).unwrap();
-            file.commit().unwrap();
+            host_file.read_exact(&mut buffer)?;
+            file.write(0, &buffer)?;
+            file.commit()?;
         } else {
             println!("Unrecognized file type: {:?}", entry.path());
         }
@@ -215,29 +215,29 @@ where
     Ok(())
 }
 
-fn import<T: FileSystem>(save: T, mountpoint: &std::path::Path) -> Result<(), ()>
+fn import<T: FileSystem>(save: T, mountpoint: &std::path::Path) -> Result<(), Error>
 where
     T::NameType: NameConvert + Clone,
 {
     println!("Clearing the original contents...");
-    let root = save.open_root().unwrap();
+    let root = save.open_root()?;
     clear_impl(&save, &root)?;
     clear_impl(&save, &root)?;
     println!("Importing new contents...");
-    import_impl(&save, &root, mountpoint).unwrap();
-    save.commit().unwrap();
+    import_impl(&save, &root, mountpoint)?;
+    save.commit()?;
     println!("Finished");
     Ok(())
 }
 
 #[allow(unreachable_code, unused_variables)]
-fn do_mount<T: FileSystem>(save: T, read_only: bool, mountpoint: &std::path::Path) -> Result<(), ()>
+fn do_mount<T: FileSystem>(save: T, read_only: bool, mountpoint: &std::path::Path) -> Result<(), Error>
 where
     T::NameType: NameConvert + Clone,
 {
     #[cfg(all(unix, feature = "unixfuse"))]
     {
-        mount2(FileSystemFrontend::new(save, read_only), &mountpoint, &[]).unwrap();
+        mount2(FileSystemFrontend::new(save, read_only), &mountpoint, &[])?;
         return Ok(());
     }
     println!("fuse not implemented. Please specify --extract or --import flag");
@@ -248,7 +248,7 @@ fn start<T: FileSystem>(
     save: T,
     operation: FileSystemOperation,
     mountpoint: &std::path::Path,
-) -> Result<(), ()>
+) -> Result<(), Error>
 where
     T::NameType: NameConvert + Clone,
 {
