@@ -2,7 +2,7 @@ use getopts::Options;
 use libsave3ds::db::*;
 use libsave3ds::error::*;
 use libsave3ds::ext_data::*;
-use libsave3ds::file_system::{*};
+use libsave3ds::file_system::*;
 use libsave3ds::save_data::*;
 use libsave3ds::Resource;
 use std::collections::HashMap;
@@ -112,7 +112,7 @@ fn extract_impl<T: FileSystem>(
     path: &std::path::Path,
     indent: u32,
 ) -> Result<(), Error>
-    where
+where
     T::NameType: NameConvert + Clone,
 {
     if !path.exists() {
@@ -176,11 +176,7 @@ where
     Ok(())
 }
 
-fn import_impl<T: FileSystem>(
-    save: &T,
-    dir: &T::DirType,
-    path: &std::path::Path,
-) -> Result<(), ()>
+fn import_impl<T: FileSystem>(save: &T, dir: &T::DirType, path: &std::path::Path) -> Result<(), ()>
 where
     T::NameType: NameConvert + Clone,
 {
@@ -226,19 +222,16 @@ where
     println!("Clearing the original contents...");
     let root = save.open_root().unwrap();
     clear_impl(&save, &root)?;
+    clear_impl(&save, &root)?;
     println!("Importing new contents...");
-    import_impl(&save, &root, mountpoint)?;
+    import_impl(&save, &root, mountpoint).unwrap();
     save.commit().unwrap();
     println!("Finished");
     Ok(())
 }
 
 #[allow(unreachable_code, unused_variables)]
-fn do_mount<T: FileSystem>(
-    save: T,
-    read_only: bool,
-    mountpoint: &std::path::Path,
-) -> Result<(), ()>
+fn do_mount<T: FileSystem>(save: T, read_only: bool, mountpoint: &std::path::Path) -> Result<(), ()>
 where
     T::NameType: NameConvert + Clone,
 {
@@ -472,7 +465,7 @@ where
             Ino::File(ino) => {
                 if let Ok(file) = self.save.open_file(ino) {
                     reply.attr(
-                        &Duration::new(1,0),
+                        &Duration::new(1, 0),
                         &make_file_attr(
                             self.read_only,
                             self.uid,
@@ -526,7 +519,7 @@ where
         _chgtime: Option<SystemTime>,
         _bkuptime: Option<SystemTime>,
         _flags: Option<u32>,
-        reply: ReplyAttr
+        reply: ReplyAttr,
     ) {
         match Ino::from_os(ino) {
             Ino::File(ino) => {
@@ -565,7 +558,7 @@ where
                 }
 
                 reply.attr(
-                    &Duration::new(1,0),
+                    &Duration::new(1, 0),
                     &make_file_attr(
                         self.read_only,
                         self.uid,
@@ -579,6 +572,56 @@ where
         }
     }
 
+    fn mkdir(
+        &mut self,
+        _req: &Request<'_>,
+        parent: u64,
+        name: &OsStr,
+        _mode: u32,
+        _umask: u32,
+        reply: ReplyEntry,
+    ) {
+        if self.read_only {
+            reply.error(EROFS);
+            return;
+        }
+        let name_converted: T::NameType = if let Some((n, _)) = name_os_to_3ds(name) {
+            n
+        } else {
+            reply.error(ENAMETOOLONG);
+            return;
+        };
+        match Ino::from_os(parent) {
+            Ino::File(_) => {
+                reply.error(ENOTDIR);
+            }
+            Ino::Dir(ino) => {
+                let parent_dir = if let Ok(parent_dir) = self.save.open_dir(ino) {
+                    parent_dir
+                } else {
+                    reply.error(EIO);
+                    return;
+                };
+                match parent_dir.new_sub_dir(name_converted) {
+                    Ok(child) => reply.entry(
+                        &Duration::new(1, 0),
+                        &make_dir_attr(
+                            self.read_only,
+                            self.uid,
+                            self.gid,
+                            Ino::Dir(child.get_ino()).to_os(),
+                            0,
+                        ),
+                        0,
+                    ),
+                    Err(Error::AlreadyExist) => reply.error(EEXIST),
+                    Err(Error::NoSpace) => reply.error(ENOSPC),
+                    Err(_) => reply.error(EIO),
+                }
+            }
+        }
+    }
+
     fn mknod(
         &mut self,
         _req: &Request<'_>,
@@ -586,7 +629,8 @@ where
         name: &OsStr,
         _mode: u32,
         _umask: u32,
-        _rdev: u32, reply: ReplyEntry
+        _rdev: u32,
+        reply: ReplyEntry,
     ) {
         if self.read_only {
             reply.error(EROFS);
@@ -631,8 +675,7 @@ where
         }
     }
 
-
-    fn mkdir(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, _mode: u32, _umask: u32, reply: ReplyEntry) {
+    fn rmdir(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEmpty) {
         if self.read_only {
             reply.error(EROFS);
             return;
@@ -643,6 +686,7 @@ where
             reply.error(ENAMETOOLONG);
             return;
         };
+
         match Ino::from_os(parent) {
             Ino::File(_) => {
                 reply.error(ENOTDIR);
@@ -654,22 +698,16 @@ where
                     reply.error(EIO);
                     return;
                 };
-                match parent_dir.new_sub_dir(name_converted) {
-                    Ok(child) => reply.entry(
-                        &Duration::new(1, 0),
-                        &make_dir_attr(
-                            self.read_only,
-                            self.uid,
-                            self.gid,
-                            Ino::Dir(child.get_ino()).to_os(),
-                            0,
-                        ),
-                        0,
-                    ),
-                    Err(Error::AlreadyExist) => reply.error(EEXIST),
-                    Err(Error::NoSpace) => reply.error(ENOSPC),
-                    Err(_) => reply.error(EIO),
+
+                if let Ok(child) = parent_dir.open_sub_dir(name_converted) {
+                    match child.delete() {
+                        Ok(()) => reply.ok(),
+                        Err(Error::NotEmpty) => reply.error(ENOTEMPTY),
+                        Err(_) => reply.error(EIO),
+                    }
+                    return;
                 }
+                reply.error(ENOENT);
             }
         }
     }
@@ -710,131 +748,6 @@ where
         }
     }
 
-    fn rmdir(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEmpty) {
-        if self.read_only {
-            reply.error(EROFS);
-            return;
-        }
-        let name_converted: T::NameType = if let Some((n, _)) = name_os_to_3ds(name) {
-            n
-        } else {
-            reply.error(ENAMETOOLONG);
-            return;
-        };
-
-        match Ino::from_os(parent) {
-            Ino::File(_) => {
-                reply.error(ENOTDIR);
-            }
-            Ino::Dir(ino) => {
-                let parent_dir = if let Ok(parent_dir) = self.save.open_dir(ino) {
-                    parent_dir
-                } else {
-                    reply.error(EIO);
-                    return;
-                };
-
-                if let Ok(child) = parent_dir.open_sub_dir(name_converted) {
-                    match child.delete() {
-                        Ok(()) => reply.ok(),
-                        Err(Error::NotEmpty) => reply.error(ENOTEMPTY),
-                        Err(_) => reply.error(EIO),
-                    }
-                    return;
-                }
-                reply.error(ENOENT);
-            }
-        }
-    }
-
-    fn rename(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, newparent: u64, newname: &OsStr, _flags: u32, reply: ReplyEmpty) {
-        if self.read_only {
-            reply.error(EROFS);
-            return;
-        }
-
-        let name_converted: T::NameType = if let Some((n, _)) = name_os_to_3ds(name) {
-            n
-        } else {
-            reply.error(ENAMETOOLONG);
-            return;
-        };
-        let newname_converted: T::NameType = if let Some((n, _)) = name_os_to_3ds(newname) {
-            n
-        } else {
-            reply.error(ENAMETOOLONG);
-            return;
-        };
-
-        let dir = match Ino::from_os(parent) {
-            Ino::File(_) => {
-                reply.error(ENOTDIR);
-                return;
-            }
-            Ino::Dir(ino) => match self.save.open_dir(ino) {
-                Ok(dir) => dir,
-                Err(_) => {
-                    reply.error(EIO);
-                    return;
-                }
-            },
-        };
-
-        let newdir = match Ino::from_os(newparent) {
-            Ino::File(_) => {
-                reply.error(ENOTDIR);
-                return;
-            }
-            Ino::Dir(ino) => match self.save.open_dir(ino) {
-                Ok(dir) => dir,
-                Err(_) => {
-                    reply.error(EIO);
-                    return;
-                }
-            },
-        };
-
-        if let Ok(mut file) = dir.open_sub_file(name_converted.clone()) {
-            if let Ok(old_file) = newdir.open_sub_file(newname_converted.clone()) {
-                match old_file.delete() {
-                    Ok(()) => (),
-                    Err(_) => {
-                        reply.error(EIO);
-                        return;
-                    }
-                }
-            }
-
-            match file.rename(&newdir, newname_converted) {
-                Ok(()) => reply.ok(),
-                Err(Error::AlreadyExist) => reply.error(EEXIST),
-                Err(_) => reply.error(EIO),
-            }
-        } else if let Ok(mut dir) = dir.open_sub_dir(name_converted) {
-            if let Ok(old_dir) = newdir.open_sub_dir(newname_converted.clone()) {
-                match old_dir.delete() {
-                    Ok(()) => (),
-                    Err(Error::NotEmpty) => {
-                        reply.error(ENOTEMPTY);
-                        return;
-                    }
-                    Err(_) => {
-                        reply.error(EIO);
-                        return;
-                    }
-                }
-            }
-
-            match dir.rename(&newdir, newname_converted) {
-                Ok(()) => reply.ok(),
-                Err(Error::AlreadyExist) => reply.error(EEXIST),
-                Err(_) => reply.error(EIO),
-            }
-        } else {
-            reply.error(ENOENT);
-        }
-    }
-
     fn open(&mut self, _req: &Request, ino: u64, _flags: i32, reply: ReplyOpen) {
         match Ino::from_os(ino) {
             Ino::File(ino) => {
@@ -852,7 +765,37 @@ where
         }
     }
 
-    fn read(&mut self, _req: &Request<'_>, _ino: u64, fh: u64, offset: i64, size: u32, _flags: i32, _lock_owner: Option<u64>, reply: ReplyData) {
+    fn release(
+        &mut self,
+        _req: &Request,
+        _ino: u64,
+        fh: u64,
+        _flags: i32,
+        _lock_owner: Option<u64>,
+        _flush: bool,
+        reply: ReplyEmpty,
+    ) {
+        if let Some(file) = self.file_fh_map.remove(&fh) {
+            if !self.read_only {
+                if let Err(e) = file.commit() {
+                    println!("Failed to save file: {}", e);
+                }
+            }
+        }
+        reply.ok();
+    }
+
+    fn read(
+        &mut self,
+        _req: &Request<'_>,
+        _ino: u64,
+        fh: u64,
+        offset: i64,
+        size: u32,
+        _flags: i32,
+        _lock_owner: Option<u64>,
+        reply: ReplyData,
+    ) {
         let offset = offset as usize;
         let size = size as usize;
         if let Some(file) = self.file_fh_map.get(&fh) {
@@ -875,7 +818,18 @@ where
         }
     }
 
-    fn write(&mut self, _req: &Request<'_>, _ino: u64, fh: u64, offset: i64, data: &[u8], _write_flags: u32, _flags: i32, _lock_owner: Option<u64>, reply: ReplyWrite) {
+    fn write(
+        &mut self,
+        _req: &Request<'_>,
+        _ino: u64,
+        fh: u64,
+        offset: i64,
+        data: &[u8],
+        _write_flags: u32,
+        _flags: i32,
+        _lock_owner: Option<u64>,
+        reply: ReplyWrite,
+    ) {
         if self.read_only {
             reply.error(EROFS);
             return;
@@ -909,26 +863,6 @@ where
         } else {
             reply.error(EBADF);
         }
-    }
-
-    fn release(
-        &mut self,
-        _req: &Request,
-        _ino: u64,
-        fh: u64,
-        _flags: i32,
-        _lock_owner: Option<u64>,
-        _flush: bool,
-        reply: ReplyEmpty,
-    ) {
-        if let Some(file) = self.file_fh_map.remove(&fh) {
-            if !self.read_only {
-                if let Err(e) = file.commit() {
-                    println!("Failed to save file: {}", e);
-                }
-            }
-        }
-        reply.ok();
     }
 
     fn opendir(&mut self, _req: &Request, ino: u64, _flags: i32, reply: ReplyOpen) {
@@ -1018,6 +952,103 @@ where
     fn releasedir(&mut self, _req: &Request, _ino: u64, fh: u64, _flags: i32, reply: ReplyEmpty) {
         self.dir_fh_map.remove(&fh);
         reply.ok();
+    }
+
+    fn rename(
+        &mut self,
+        _req: &Request<'_>,
+        parent: u64,
+        name: &OsStr,
+        newparent: u64,
+        newname: &OsStr,
+        _flags: u32,
+        reply: ReplyEmpty,
+    ) {
+        if self.read_only {
+            reply.error(EROFS);
+            return;
+        }
+
+        let name_converted: T::NameType = if let Some((n, _)) = name_os_to_3ds(name) {
+            n
+        } else {
+            reply.error(ENAMETOOLONG);
+            return;
+        };
+        let newname_converted: T::NameType = if let Some((n, _)) = name_os_to_3ds(newname) {
+            n
+        } else {
+            reply.error(ENAMETOOLONG);
+            return;
+        };
+
+        let dir = match Ino::from_os(parent) {
+            Ino::File(_) => {
+                reply.error(ENOTDIR);
+                return;
+            }
+            Ino::Dir(ino) => match self.save.open_dir(ino) {
+                Ok(dir) => dir,
+                Err(_) => {
+                    reply.error(EIO);
+                    return;
+                }
+            },
+        };
+
+        let newdir = match Ino::from_os(newparent) {
+            Ino::File(_) => {
+                reply.error(ENOTDIR);
+                return;
+            }
+            Ino::Dir(ino) => match self.save.open_dir(ino) {
+                Ok(dir) => dir,
+                Err(_) => {
+                    reply.error(EIO);
+                    return;
+                }
+            },
+        };
+
+        if let Ok(mut file) = dir.open_sub_file(name_converted.clone()) {
+            if let Ok(old_file) = newdir.open_sub_file(newname_converted.clone()) {
+                match old_file.delete() {
+                    Ok(()) => (),
+                    Err(_) => {
+                        reply.error(EIO);
+                        return;
+                    }
+                }
+            }
+
+            match file.rename(&newdir, newname_converted) {
+                Ok(()) => reply.ok(),
+                Err(Error::AlreadyExist) => reply.error(EEXIST),
+                Err(_) => reply.error(EIO),
+            }
+        } else if let Ok(mut dir) = dir.open_sub_dir(name_converted) {
+            if let Ok(old_dir) = newdir.open_sub_dir(newname_converted.clone()) {
+                match old_dir.delete() {
+                    Ok(()) => (),
+                    Err(Error::NotEmpty) => {
+                        reply.error(ENOTEMPTY);
+                        return;
+                    }
+                    Err(_) => {
+                        reply.error(EIO);
+                        return;
+                    }
+                }
+            }
+
+            match dir.rename(&newdir, newname_converted) {
+                Ok(()) => reply.ok(),
+                Err(Error::AlreadyExist) => reply.error(EEXIST),
+                Err(_) => reply.error(EIO),
+            }
+        } else {
+            reply.error(ENOENT);
+        }
     }
 
     fn statfs(&mut self, _req: &Request, _ino: u64, reply: ReplyStatfs) {
@@ -1385,7 +1416,8 @@ fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
             resource.open_bare_save(&bare, !read_only)?,
             operation,
             mountpoint,
-        ).unwrap()
+        )
+        .unwrap()
     } else if let Some(id) = nand_save_id {
         let id = u32::from_str_radix(&id, 16)?;
         if let Some(format_param) = format_param {
@@ -1399,7 +1431,8 @@ fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
             resource.open_nand_save(id, !read_only)?,
             operation,
             mountpoint,
-        ).unwrap()
+        )
+        .unwrap()
     } else if let Some(id) = sd_save_id {
         let id = u64::from_str_radix(&id, 16)?;
         if let Some(format_param) = format_param {
@@ -1413,7 +1446,8 @@ fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
             resource.open_sd_save(id, !read_only)?,
             operation,
             mountpoint,
-        ).unwrap()
+        )
+        .unwrap()
     } else if let Some(id) = sd_ext_id {
         let id = u64::from_str_radix(&id, 16)?;
         if let Some(format_param) = format_param {
@@ -1437,7 +1471,8 @@ fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
             resource.open_nand_ext(id, !read_only)?,
             operation,
             mountpoint,
-        ).unwrap()
+        )
+        .unwrap()
     } else if let Some(db_type) = db_type {
         if format_param.is_some() {
             println!("Warning: formatting not supported");
@@ -1460,7 +1495,8 @@ fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
             resource.open_db(db_type, !read_only)?,
             operation,
             mountpoint,
-        ).unwrap()
+        )
+        .unwrap()
     } else if let Some(cart) = cart_path {
         if let Some(format_param) = format_param {
             println!("Formatting...");
@@ -1472,7 +1508,8 @@ fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
             resource.open_cart_save(&cart, !read_only)?,
             operation,
             mountpoint,
-        ).unwrap()
+        )
+        .unwrap()
     } else {
         panic!()
     };
