@@ -429,7 +429,7 @@ where
                     };
 
                     reply.entry(
-                        &Duration::new(0, 1),
+                        &Duration::new(1, 0),
                         &make_dir_attr(
                             self.read_only,
                             self.uid,
@@ -1416,8 +1416,7 @@ fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
             resource.open_bare_save(&bare, !read_only)?,
             operation,
             mountpoint,
-        )
-        .unwrap()
+        )?
     } else if let Some(id) = nand_save_id {
         let id = u32::from_str_radix(&id, 16)?;
         if let Some(format_param) = format_param {
