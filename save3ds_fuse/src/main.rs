@@ -222,7 +222,6 @@ where
     println!("Clearing the original contents...");
     let root = save.open_root()?;
     clear_impl(&save, &root)?;
-    clear_impl(&save, &root)?;
     println!("Importing new contents...");
     import_impl(&save, &root, mountpoint)?;
     save.commit()?;
@@ -443,7 +442,7 @@ where
                 }
                 if let Ok(child) = parent_dir.open_sub_file(name_converted) {
                     reply.entry(
-                        &Duration::new(0, 1),
+                        &Duration::new(1, 0),
                         &make_file_attr(
                             self.read_only,
                             self.uid,
@@ -1430,8 +1429,7 @@ fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
             resource.open_nand_save(id, !read_only)?,
             operation,
             mountpoint,
-        )
-        .unwrap()
+        )?
     } else if let Some(id) = sd_save_id {
         let id = u64::from_str_radix(&id, 16)?;
         if let Some(format_param) = format_param {
@@ -1445,8 +1443,7 @@ fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
             resource.open_sd_save(id, !read_only)?,
             operation,
             mountpoint,
-        )
-        .unwrap()
+        )?
     } else if let Some(id) = sd_ext_id {
         let id = u64::from_str_radix(&id, 16)?;
         if let Some(format_param) = format_param {
@@ -1456,7 +1453,7 @@ fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
             println!("Formatting done");
         }
 
-        start(resource.open_sd_ext(id, !read_only)?, operation, mountpoint).unwrap()
+        start(resource.open_sd_ext(id, !read_only)?, operation, mountpoint)?
     } else if let Some(id) = nand_ext_id {
         let id = u64::from_str_radix(&id, 16)?;
         if let Some(format_param) = format_param {
@@ -1470,8 +1467,7 @@ fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
             resource.open_nand_ext(id, !read_only)?,
             operation,
             mountpoint,
-        )
-        .unwrap()
+        )?
     } else if let Some(db_type) = db_type {
         if format_param.is_some() {
             println!("Warning: formatting not supported");
@@ -1494,8 +1490,7 @@ fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
             resource.open_db(db_type, !read_only)?,
             operation,
             mountpoint,
-        )
-        .unwrap()
+        )?
     } else if let Some(cart) = cart_path {
         if let Some(format_param) = format_param {
             println!("Formatting...");
@@ -1507,8 +1502,7 @@ fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
             resource.open_cart_save(&cart, !read_only)?,
             operation,
             mountpoint,
-        )
-        .unwrap()
+        )?
     } else {
         panic!()
     };
