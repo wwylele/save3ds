@@ -2,21 +2,21 @@ use getopts::Options;
 use libsave3ds::db::*;
 use libsave3ds::error::*;
 use libsave3ds::ext_data::*;
-use libsave3ds::file_system::{self, *};
+use libsave3ds::file_system::*;
 use libsave3ds::save_data::*;
 use libsave3ds::Resource;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::io::Read;
+use std::time::{Duration, SystemTime};
 
 #[cfg(all(unix, feature = "unixfuse"))]
 use {
-    fuse::*,
+    fuser::*,
     libc::{
         getegid, geteuid, EBADF, EEXIST, EIO, EISDIR, ENAMETOOLONG, ENOENT, ENOSPC, ENOSYS,
         ENOTDIR, ENOTEMPTY, EROFS,
     },
-    time,
 };
 
 enum FileSystemOperation {
@@ -106,7 +106,7 @@ impl NameConvert for [u8; 16] {
     }
 }
 
-fn extract_impl<T: file_system::FileSystem>(
+fn extract_impl<T: FileSystem>(
     save: &T,
     dir: T::DirType,
     path: &std::path::Path,
@@ -147,7 +147,7 @@ where
     Ok(())
 }
 
-fn extract<T: file_system::FileSystem>(save: T, mountpoint: &std::path::Path) -> Result<(), Error>
+fn extract<T: FileSystem>(save: T, mountpoint: &std::path::Path) -> Result<(), Error>
 where
     T::NameType: NameConvert + Clone,
 {
@@ -158,7 +158,7 @@ where
     Ok(())
 }
 
-fn clear_impl<T: file_system::FileSystem>(save: &T, dir: &T::DirType) -> Result<(), Error>
+fn clear_impl<T: FileSystem>(save: &T, dir: &T::DirType) -> Result<(), Error>
 where
     T::NameType: NameConvert + Clone,
 {
@@ -176,11 +176,7 @@ where
     Ok(())
 }
 
-fn import_impl<T: file_system::FileSystem>(
-    save: &T,
-    dir: &T::DirType,
-    path: &std::path::Path,
-) -> Result<(), Error>
+fn import_impl<T: FileSystem>(save: &T, dir: &T::DirType, path: &std::path::Path) -> Result<(), Error>
 where
     T::NameType: NameConvert + Clone,
 {
@@ -219,7 +215,7 @@ where
     Ok(())
 }
 
-fn import<T: file_system::FileSystem>(save: T, mountpoint: &std::path::Path) -> Result<(), Error>
+fn import<T: FileSystem>(save: T, mountpoint: &std::path::Path) -> Result<(), Error>
 where
     T::NameType: NameConvert + Clone,
 {
@@ -234,24 +230,20 @@ where
 }
 
 #[allow(unreachable_code, unused_variables)]
-fn do_mount<T: file_system::FileSystem>(
-    save: T,
-    read_only: bool,
-    mountpoint: &std::path::Path,
-) -> Result<(), Error>
+fn do_mount<T: FileSystem>(save: T, read_only: bool, mountpoint: &std::path::Path) -> Result<(), Error>
 where
     T::NameType: NameConvert + Clone,
 {
     #[cfg(all(unix, feature = "unixfuse"))]
     {
-        mount(FileSystemFrontend::new(save, read_only), &mountpoint, &[])?;
+        mount2(FileSystemFrontend::new(save, read_only), &mountpoint, &[])?;
         return Ok(());
     }
     println!("fuse not implemented. Please specify --extract or --import flag");
     Ok(())
 }
 
-fn start<T: file_system::FileSystem>(
+fn start<T: FileSystem>(
     save: T,
     operation: FileSystemOperation,
     mountpoint: &std::path::Path,
@@ -277,7 +269,7 @@ struct DirEntry {
 }
 
 #[cfg(all(unix, feature = "unixfuse"))]
-struct FileSystemFrontend<T: file_system::FileSystem> {
+struct FileSystemFrontend<T: FileSystem> {
     save: T,
     read_only: bool,
     file_fh_map: HashMap<u64, T::FileType>,
@@ -288,7 +280,7 @@ struct FileSystemFrontend<T: file_system::FileSystem> {
 }
 
 #[cfg(all(unix, feature = "unixfuse"))]
-impl<T: file_system::FileSystem> FileSystemFrontend<T>
+impl<T: FileSystem> FileSystemFrontend<T>
 where
     T::NameType: NameConvert + Clone,
 {
@@ -311,16 +303,17 @@ fn make_dir_attr(read_only: bool, uid: u32, gid: u32, ino: u64, sub_file_count: 
         ino,
         size: 0,
         blocks: 0,
-        atime: time::Timespec::new(0, 0),
-        mtime: time::Timespec::new(0, 0),
-        ctime: time::Timespec::new(0, 0),
-        crtime: time::Timespec::new(0, 0),
+        atime: SystemTime::UNIX_EPOCH,
+        mtime: SystemTime::UNIX_EPOCH,
+        ctime: SystemTime::UNIX_EPOCH,
+        crtime: SystemTime::UNIX_EPOCH,
         kind: FileType::Directory,
         perm: if read_only { 0o555 } else { 0o755 },
         nlink: 2 + sub_file_count as u32,
         uid,
         gid,
         rdev: 0,
+        blksize: 0,
         flags: 0,
     }
 }
@@ -331,16 +324,17 @@ fn make_file_attr(read_only: bool, uid: u32, gid: u32, ino: u64, file_size: usiz
         ino,
         size: file_size as u64,
         blocks: 1,
-        atime: time::Timespec::new(0, 0),
-        mtime: time::Timespec::new(0, 0),
-        ctime: time::Timespec::new(0, 0),
-        crtime: time::Timespec::new(0, 0),
+        atime: SystemTime::UNIX_EPOCH,
+        mtime: SystemTime::UNIX_EPOCH,
+        ctime: SystemTime::UNIX_EPOCH,
+        crtime: SystemTime::UNIX_EPOCH,
         kind: FileType::RegularFile,
         perm: if read_only { 0o444 } else { 0o644 },
         nlink: 1,
         uid,
         gid,
         rdev: 0,
+        blksize: 0,
         flags: 0,
     }
 }
@@ -383,7 +377,7 @@ impl Ino {
 }
 
 #[cfg(all(unix, feature = "unixfuse"))]
-impl<T: file_system::FileSystem> Drop for FileSystemFrontend<T> {
+impl<T: FileSystem> Drop for FileSystemFrontend<T> {
     fn drop(&mut self) {
         if !self.read_only {
             self.save.commit().unwrap();
@@ -393,11 +387,11 @@ impl<T: file_system::FileSystem> Drop for FileSystemFrontend<T> {
 }
 
 #[cfg(all(unix, feature = "unixfuse"))]
-impl<T: file_system::FileSystem> Filesystem for FileSystemFrontend<T>
+impl<T: FileSystem> Filesystem for FileSystemFrontend<T>
 where
     T::NameType: NameConvert + Clone,
 {
-    fn init(&mut self, _req: &Request) -> Result<(), i32> {
+    fn init(&mut self, _req: &Request, _kc: &mut KernelConfig) -> Result<(), i32> {
         let (uid, gid) = unsafe { (geteuid(), getegid()) };
         self.uid = uid;
         self.gid = gid;
@@ -434,7 +428,7 @@ where
                     };
 
                     reply.entry(
-                        &time::Timespec::new(1, 0),
+                        &Duration::new(1, 0),
                         &make_dir_attr(
                             self.read_only,
                             self.uid,
@@ -448,7 +442,7 @@ where
                 }
                 if let Ok(child) = parent_dir.open_sub_file(name_converted) {
                     reply.entry(
-                        &time::Timespec::new(1, 0),
+                        &Duration::new(1, 0),
                         &make_file_attr(
                             self.read_only,
                             self.uid,
@@ -470,7 +464,7 @@ where
             Ino::File(ino) => {
                 if let Ok(file) = self.save.open_file(ino) {
                     reply.attr(
-                        &time::Timespec::new(1, 0),
+                        &Duration::new(1, 0),
                         &make_file_attr(
                             self.read_only,
                             self.uid,
@@ -492,7 +486,7 @@ where
                         return;
                     };
                     reply.attr(
-                        &time::Timespec::new(1, 0),
+                        &Duration::new(1, 0),
                         &make_dir_attr(
                             self.read_only,
                             self.uid,
@@ -510,18 +504,19 @@ where
 
     fn setattr(
         &mut self,
-        _req: &Request,
+        _req: &Request<'_>,
         ino: u64,
         _mode: Option<u32>,
         _uid: Option<u32>,
         _gid: Option<u32>,
         size: Option<u64>,
-        _atime: Option<time::Timespec>,
-        _mtime: Option<time::Timespec>,
+        _atime: Option<TimeOrNow>,
+        _mtime: Option<TimeOrNow>,
+        _ctime: Option<SystemTime>,
         fh: Option<u64>,
-        _crtime: Option<time::Timespec>,
-        _chgtime: Option<time::Timespec>,
-        _bkuptime: Option<time::Timespec>,
+        _crtime: Option<SystemTime>,
+        _chgtime: Option<SystemTime>,
+        _bkuptime: Option<SystemTime>,
         _flags: Option<u32>,
         reply: ReplyAttr,
     ) {
@@ -562,7 +557,7 @@ where
                 }
 
                 reply.attr(
-                    &time::Timespec::new(1, 0),
+                    &Duration::new(1, 0),
                     &make_file_attr(
                         self.read_only,
                         self.uid,
@@ -576,7 +571,15 @@ where
         }
     }
 
-    fn mkdir(&mut self, _req: &Request, parent: u64, name: &OsStr, _mode: u32, reply: ReplyEntry) {
+    fn mkdir(
+        &mut self,
+        _req: &Request<'_>,
+        parent: u64,
+        name: &OsStr,
+        _mode: u32,
+        _umask: u32,
+        reply: ReplyEntry,
+    ) {
         if self.read_only {
             reply.error(EROFS);
             return;
@@ -600,7 +603,7 @@ where
                 };
                 match parent_dir.new_sub_dir(name_converted) {
                     Ok(child) => reply.entry(
-                        &time::Timespec::new(1, 0),
+                        &Duration::new(1, 0),
                         &make_dir_attr(
                             self.read_only,
                             self.uid,
@@ -620,10 +623,11 @@ where
 
     fn mknod(
         &mut self,
-        _req: &Request,
+        _req: &Request<'_>,
         parent: u64,
         name: &OsStr,
         _mode: u32,
+        _umask: u32,
         _rdev: u32,
         reply: ReplyEntry,
     ) {
@@ -652,7 +656,7 @@ where
 
                 match parent_dir.new_sub_file(name_converted, size) {
                     Ok(child) => reply.entry(
-                        &time::Timespec::new(1, 0),
+                        &Duration::new(1, 0),
                         &make_file_attr(
                             self.read_only,
                             self.uid,
@@ -743,7 +747,7 @@ where
         }
     }
 
-    fn open(&mut self, _req: &Request, ino: u64, _flags: u32, reply: ReplyOpen) {
+    fn open(&mut self, _req: &Request, ino: u64, _flags: i32, reply: ReplyOpen) {
         match Ino::from_os(ino) {
             Ino::File(ino) => {
                 if let Ok(file) = self.save.open_file(ino) {
@@ -765,8 +769,8 @@ where
         _req: &Request,
         _ino: u64,
         fh: u64,
-        _flags: u32,
-        _lock_owner: u64,
+        _flags: i32,
+        _lock_owner: Option<u64>,
         _flush: bool,
         reply: ReplyEmpty,
     ) {
@@ -782,11 +786,13 @@ where
 
     fn read(
         &mut self,
-        _req: &Request,
+        _req: &Request<'_>,
         _ino: u64,
         fh: u64,
         offset: i64,
         size: u32,
+        _flags: i32,
+        _lock_owner: Option<u64>,
         reply: ReplyData,
     ) {
         let offset = offset as usize;
@@ -813,12 +819,14 @@ where
 
     fn write(
         &mut self,
-        _req: &Request,
+        _req: &Request<'_>,
         _ino: u64,
         fh: u64,
         offset: i64,
         data: &[u8],
-        _flags: u32,
+        _write_flags: u32,
+        _flags: i32,
+        _lock_owner: Option<u64>,
         reply: ReplyWrite,
     ) {
         if self.read_only {
@@ -856,7 +864,7 @@ where
         }
     }
 
-    fn opendir(&mut self, _req: &Request, ino: u64, _flags: u32, reply: ReplyOpen) {
+    fn opendir(&mut self, _req: &Request, ino: u64, _flags: i32, reply: ReplyOpen) {
         match Ino::from_os(ino) {
             Ino::File(_) => reply.error(ENOTDIR),
             Ino::Dir(ino) => {
@@ -940,18 +948,19 @@ where
         }
     }
 
-    fn releasedir(&mut self, _req: &Request, _ino: u64, fh: u64, _flags: u32, reply: ReplyEmpty) {
+    fn releasedir(&mut self, _req: &Request, _ino: u64, fh: u64, _flags: i32, reply: ReplyEmpty) {
         self.dir_fh_map.remove(&fh);
         reply.ok();
     }
 
     fn rename(
         &mut self,
-        _req: &Request,
+        _req: &Request<'_>,
         parent: u64,
         name: &OsStr,
         newparent: u64,
         newname: &OsStr,
+        _flags: u32,
         reply: ReplyEmpty,
     ) {
         if self.read_only {
