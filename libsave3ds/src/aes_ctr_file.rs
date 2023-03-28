@@ -5,6 +5,7 @@ use aes::cipher::*;
 use aes::*;
 use lru::LruCache;
 use std::cell::RefCell;
+use std::num::NonZeroUsize;
 use std::rc::Rc;
 
 /// Implements `RandomAccessFile` layer that does AES-128-CTR encryption
@@ -45,7 +46,7 @@ impl AesCtrFile {
             aes128,
             ctr,
             len,
-            cache: RefCell::new(LruCache::new(16)),
+            cache: RefCell::new(LruCache::new(NonZeroUsize::new(16).unwrap())),
             repeat_ctr,
         }
     }

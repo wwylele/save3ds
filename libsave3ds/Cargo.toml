@@ -8,8 +8,8 @@ edition = "2018"
 sha2 = "0.10"
 aes = "0.8"
 cmac = "0.7"
-byte_struct = "0.7"
-lru = "0.7"
+byte_struct = "0.9"
+lru = "0.10"
 log = "0.4"
 
 [dev-dependencies]
