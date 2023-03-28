@@ -1,7 +1,5 @@
 # Save3DS
 
-[![Build Status](https://travis-ci.com/wwylele/save3ds.svg?branch=master)](https://travis-ci.com/wwylele/save3ds)
-
 Extract, import and FUSE program for common save format for 3DS, written in rust.
 
 There are two main components in the project: the library `libsave3ds`, and the FUSE program + extract/import tool `save3ds_fuse` that builds on top of it. The FUSE feature is not available on Windows.
