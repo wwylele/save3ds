@@ -834,8 +834,8 @@ mod test {
 
             crate::file_system::test::fuzzer(
                 file_system,
-                param.max_dir as usize,
-                param.max_file as usize,
+                param.max_dir,
+                param.max_file,
                 || SaveData::new(disa_raw.clone(), SaveDataType::Bare).unwrap(),
                 gen_name,
                 gen_len,

@@ -2,7 +2,7 @@ use sha2::*;
 
 pub fn hash_movable(key: [u8; 16]) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(&key);
+    hasher.update(key);
     let hash = hasher.finalize();
     let mut result = String::new();
     for index in &[3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12] {

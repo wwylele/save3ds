@@ -45,11 +45,9 @@ impl SdNandFileSystem for Sd {
 
         let hash_path: Vec<u8> = path
             .iter()
-            .map(|s| std::iter::once(b'/').chain(s.bytes()))
-            .flatten()
+            .flat_map(|s| std::iter::once(b'/').chain(s.bytes()))
             .chain(std::iter::once(0))
-            .map(|c| std::iter::once(c).chain(std::iter::once(0)))
-            .flatten()
+            .flat_map(|c| std::iter::once(c).chain(std::iter::once(0)))
             .collect();
 
         let mut hasher = Sha256::new();

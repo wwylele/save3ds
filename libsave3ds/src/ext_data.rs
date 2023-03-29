@@ -504,7 +504,7 @@ impl File {
                     if quota.free_block < block {
                         return make_error(Error::NoSpace);
                     }
-                    quota.mount_id = file_index as u32;
+                    quota.mount_id = file_index;
                     quota.mount_len = physical_len as u64;
                     quota.potential_free_block = quota.free_block;
                     quota.free_block -= block;
@@ -572,7 +572,7 @@ impl File {
 
         if let Some(quota_file) = self.center.quota_file.as_ref() {
             let mut quota: Quota = read_struct(quota_file.partition().as_ref(), 0)?;
-            quota.mount_id = file_index as u32;
+            quota.mount_id = file_index;
             quota.mount_len = physical_len as u64;
             let block = (divide_up(physical_len, 0x1000)) as u32;
             quota.free_block += block;
@@ -854,8 +854,8 @@ mod test {
             let file_system = ExtData::new(nand.clone(), &[], 0, [0; 16], false, true).unwrap();
             crate::file_system::test::fuzzer(
                 file_system,
-                param.max_dir as usize,
-                param.max_file as usize,
+                param.max_dir,
+                param.max_file,
                 || ExtData::new(nand.clone(), &[], 0, [0; 16], false, true).unwrap(),
                 gen_name,
                 gen_len,

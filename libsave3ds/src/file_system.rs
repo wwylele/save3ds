@@ -410,7 +410,7 @@ pub mod test {
                                 Err(Error::NoSpace) => {
                                     let stat = file_system.stat().unwrap();
                                     assert!(
-                                        file_mirrors.len() == max_file as usize
+                                        file_mirrors.len() == max_file
                                             || stat.free_blocks * stat.block_len < len
                                     );
                                 }

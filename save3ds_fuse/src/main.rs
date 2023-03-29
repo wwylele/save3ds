@@ -8,7 +8,6 @@ use libsave3ds::Resource;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::io::Read;
-use std::time::{Duration, SystemTime};
 
 #[cfg(all(unix, feature = "unixfuse"))]
 use {
@@ -17,6 +16,7 @@ use {
         getegid, geteuid, EBADF, EEXIST, EIO, EISDIR, ENAMETOOLONG, ENOENT, ENOSPC, ENOSYS,
         ENOTDIR, ENOTEMPTY, EROFS,
     },
+    std::time::{Duration, SystemTime},
 };
 
 enum FileSystemOperation {
@@ -27,7 +27,7 @@ enum FileSystemOperation {
 }
 
 fn is_legal_char(c: u8) -> bool {
-    c >= 32 && c < 127 && c != 47 && c != 92
+    (32..127).contains(&c) && c != 47 && c != 92
 }
 
 trait NameConvert {
@@ -176,11 +176,15 @@ where
     Ok(())
 }
 
-fn import_impl<T: FileSystem>(save: &T, dir: &T::DirType, path: &std::path::Path) -> Result<(), Error>
+fn import_impl<T: FileSystem>(
+    _save: &T,
+    dir: &T::DirType,
+    path: &std::path::Path,
+) -> Result<(), Error>
 where
     T::NameType: NameConvert + Clone,
 {
-    for entry in std::fs::read_dir(&path)? {
+    for entry in std::fs::read_dir(path)? {
         let entry = entry?;
         println!("{:?}", entry.path());
         let name = if let Some(name) = entry
@@ -198,7 +202,7 @@ where
         let file_type = entry.file_type()?;
         if file_type.is_dir() {
             let dir = dir.new_sub_dir(name)?;
-            import_impl(save, &dir, &entry.path())?
+            import_impl(_save, &dir, &entry.path())?
         } else if file_type.is_file() {
             let mut host_file = std::fs::File::open(&entry.path())?;
             let len = host_file.metadata()?.len() as usize;
@@ -230,7 +234,11 @@ where
 }
 
 #[allow(unreachable_code, unused_variables)]
-fn do_mount<T: FileSystem>(save: T, read_only: bool, mountpoint: &std::path::Path) -> Result<(), Error>
+fn do_mount<T: FileSystem>(
+    save: T,
+    read_only: bool,
+    mountpoint: &std::path::Path,
+) -> Result<(), Error>
 where
     T::NameType: NameConvert + Clone,
 {

@@ -155,8 +155,8 @@ mod test {
 
             crate::file_system::test::fuzzer(
                 file_system,
-                param.max_dir as usize,
-                param.max_file as usize,
+                param.max_dir,
+                param.max_file,
                 || CartSaveData::new(raw.clone(), &cart_format).unwrap(),
                 gen_name,
                 gen_len,

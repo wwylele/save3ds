@@ -1,3 +1,6 @@
+// digit grouping in this lib has some special meaning
+#![allow(clippy::unusual_byte_groupings)]
+
 mod aes_ctr_file;
 mod byte_struct_common;
 pub mod cart_save_data;
