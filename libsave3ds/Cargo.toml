@@ -13,4 +13,4 @@ lru = "0.16"
 log = "0.4"
 
 [dev-dependencies]
-rand = "0.8"
+rand = "0.9"
